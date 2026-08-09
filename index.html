@@ -3699,6 +3699,36 @@ Output the token list now, nothing else:`
   body.mode-dj #rsBottomPage .seq-step{min-height:11px;}
   #rsDeck .dj-disc{width:72px;height:72px;}
 
+  
+  /* ══ Record panel — final override, wins the cascade ═══════════
+     Height must be content-driven: the earlier fixed 66% was shorter
+     than the content, so the buttons overflowed and the level bar was
+     pushed out of the box.                                          */
+  body.mode-dj #rsRec{
+    flex:0 0 104px!important;align-self:center!important;height:auto!important;
+    display:flex!important;flex-direction:column!important;gap:4px!important;
+    padding:6px 5px!important;overflow:visible!important;
+  }
+  body.mode-dj #rsRec .rs-rec-pair{display:flex!important;gap:4px!important;width:100%!important;}
+  body.mode-dj #rsRec .rs-rec-pair > button{
+    flex:1 1 0!important;min-width:0!important;width:auto!important;
+    display:flex!important;flex-direction:column!important;
+    align-items:center!important;justify-content:center!important;gap:2px!important;
+    padding:5px 0!important;overflow:hidden!important;font-size:inherit!important;
+  }
+  body.mode-dj #rsRec .rs-rec-pair > button i{font-style:normal;font-size:.8rem;line-height:1;}
+  body.mode-dj #rsRec .rs-rec-pair > button b{
+    font-family:'Press Start 2P',monospace;font-size:.3rem;font-weight:400;line-height:1;
+  }
+  body.mode-dj #rsRec #rsMicBtn i{font-size:1.05rem;}     /* mic emoji larger */
+  body.mode-dj #rsRec #rsPlayBack i{font-size:1.15rem;}   /* triangle larger */
+  body.mode-dj #rsRec #rsMicLvlWrap{
+    display:block!important;width:100%!important;height:5px!important;flex:0 0 auto!important;
+    border-radius:3px;background:#20202e;overflow:hidden;
+  }
+  body.mode-dj #rsRec #rsRecTime{font-size:.42rem!important;text-align:center!important;}
+  body.mode-dj #rsRec #rsMicDbg{font-size:.26rem!important;max-height:2.6em;overflow:hidden;}
+
   </style>
 <script>
 (function(){
@@ -5123,14 +5153,14 @@ Output the token list now, nothing else:`
 
   const recRow=document.createElement('div'); recRow.id='rsRec';
   recRow.innerHTML='<div class="rs-rec-pair">'+
-                     '<button id="rsMicBtn">🎤</button>'+
-                     '<button id="rsRecBtn">●REC</button>'+
+                     '<button id="rsMicBtn"><i>🎤</i><b>MIC</b></button>'+
+                     '<button id="rsRecBtn"><i>●</i><b>REC</b></button>'+
                    '</div>'+
                    '<div id="rsMicLvlWrap"><div id="rsMicLvl"></div></div>'+
                    '<span id="rsRecTime">0:00</span>'+
                    '<div class="rs-rec-pair">'+
-                     '<button id="rsPlayBack" disabled>▶</button>'+
-                     '<button id="rsShare" disabled>↪</button>'+
+                     '<button id="rsPlayBack" disabled><i>▶</i><b>PLAY</b></button>'+
+                     '<button id="rsShare" disabled><i>↪</i><b>SHARE</b></button>'+
                    '</div>'+
                    '<span id="rsMicDbg"></span>';
   /* recRow is parented into the bottom row further down */
@@ -5192,7 +5222,7 @@ Output the token list now, nothing else:`
     try{ micSrc&&micSrc.disconnect(); }catch(e){}
     if(micStream) micStream.getTracks().forEach(t=>t.stop());
     micStream=null; micSrc=null; micAn=null;
-    micBtn.classList.remove('on','err'); micBtn.textContent='🎤';
+    micBtn.classList.remove('on','err'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>';
     micBtn.style.boxShadow=''; if(micLvl) micLvl.style.width='0';
   }
   // iOS suspends the context whenever it likes; nudge it on any interaction
@@ -5202,14 +5232,14 @@ Output the token list now, nothing else:`
   micBtn.addEventListener('click',async ()=>{
     if(micStream){ micOff(); return; }
     if(micBtn.classList.contains('err')){           // first tap clears the error
-      micBtn.classList.remove('err'); micBtn.textContent='🎤';
+      micBtn.classList.remove('err'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>';
       setLcdName('BEAT HIVE'); return;              // tap again to retry
     }
     // getUserMedia only exists in a secure context (https / localhost). Over
     // plain http navigator.mediaDevices is undefined — that is why the mic
     // never captured anything, regardless of the audio graph.
     if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-      micBtn.classList.add('err'); micBtn.textContent='✕';
+      micBtn.classList.add('err'); micBtn.innerHTML='<i>✕</i><b>MIC</b>';
       setLcdName('USE HTTPS');
       dbg('S'+(window.isSecureContext?1:0)+' M'+(navigator.mediaDevices?1:0)+' no-gUM');
       return;
@@ -5219,7 +5249,7 @@ Output the token list now, nothing else:`
       micStream=await navigator.mediaDevices.getUserMedia(
         {audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
     }catch(e){
-      micBtn.classList.add('err'); micBtn.textContent='✕';
+      micBtn.classList.add('err'); micBtn.innerHTML='<i>✕</i><b>MIC</b>';
       // name the real failure: NotAllowedError = permission/untrusted cert,
       // NotFoundError = no input device, SecurityError = insecure origin
       const n=String((e&&e.name)||e).replace('Error','').toUpperCase();
@@ -5227,7 +5257,7 @@ Output the token list now, nothing else:`
       dbg('ERR '+n.slice(0,9));
       console.error('[beat-hive] getUserMedia',e); return;
     }
-    micBtn.classList.add('on'); micBtn.textContent='🎤'; setLcdName('MIC LIVE');
+    micBtn.classList.add('on'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>'; setLcdName('MIC LIVE');
     const tr=micStream.getAudioTracks()[0];
     // a granted-but-muted track is the classic iOS silent failure
     dbg(tr?(tr.readyState+(tr.muted?' MUTED':' ok')):'no-track');
@@ -5266,13 +5296,13 @@ Output the token list now, nothing else:`
     };
     recorder.start();
     recT0=Date.now();
-    recBtn.classList.add('on'); recBtn.innerHTML='■ STOP';
+    recBtn.classList.add('on'); recBtn.innerHTML='<i>■</i><b>STOP</b>';
     recTimer=setInterval(()=>{ recTime.textContent=fmt(Date.now()-recT0); },250);
   }
   function stopRec(){
     clearInterval(recTimer); recTimer=null;
     if(recorder&&recorder.state!=='inactive') recorder.stop();
-    recBtn.classList.remove('on'); recBtn.innerHTML='● REC';
+    recBtn.classList.remove('on'); recBtn.innerHTML='<i>●</i><b>REC</b>';
   }
   recBtn.addEventListener('click',()=>{ recorder&&recorder.state==='recording'?stopRec():startRec(); });
 
@@ -5283,10 +5313,10 @@ Output the token list now, nothing else:`
       realPlay.click();
       rsPlay.classList.remove('on'); rsPlay.innerHTML='▶<span>PLAY</span>';
     }
-    if(preview){ preview.pause(); preview=null; pbBtn.textContent='▶'; return; }
+    if(preview){ preview.pause(); preview=null; pbBtn.innerHTML='<i>▶</i><b>PLAY</b>'; return; }
     preview=new Audio(URL.createObjectURL(recBlob));
-    preview.onended=()=>{ preview=null; pbBtn.textContent='▶'; };
-    preview.play(); pbBtn.textContent='■';
+    preview.onended=()=>{ preview=null; pbBtn.innerHTML='<i>▶</i><b>PLAY</b>'; };
+    preview.play(); pbBtn.innerHTML='<i>■</i><b>STOP</b>';
   });
 
   shBtn.addEventListener('click',async ()=>{
