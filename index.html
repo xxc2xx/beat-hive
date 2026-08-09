@@ -3469,7 +3469,7 @@ Output the token list now, nothing else:`
   .rs-dial::before{top:0;background:linear-gradient(#0b0b12 15%,rgba(11,11,18,0));}
   .rs-dial::after{bottom:0;background:linear-gradient(rgba(11,11,18,0),#0b0b12 85%);}
   body.mode-dj #djPads{order:3;touch-action:pan-y;}
-  body.mode-dj #rsBankDots{order:2;display:flex;gap:6px;justify-content:center;align-items:center;padding:3px 0;}
+  body.mode-dj #rsBankDots{order:4;display:flex;gap:6px;justify-content:center;align-items:center;padding:3px 0;}
   .rs-dot{width:7px;height:7px;border-radius:50%;background:#2a2a44;transition:all .15s;}
   .rs-dot.on{background:#aa55cc;width:18px;border-radius:4px;box-shadow:0 0 8px rgba(170,85,204,.6);}
   .rs-bank-name{font-family:'Press Start 2P',monospace;font-size:.4rem;color:#4a4a68;margin-left:7px;}
@@ -3522,7 +3522,7 @@ Output the token list now, nothing else:`
   body.mode-dj #djSeq .seq-step{height:13px;}
   body.mode-dj #djSeq .seq-row{gap:2px;}
 
-  body.mode-dj #rsBottom{order:4;display:flex;gap:8px;align-items:stretch;flex:0 0 auto;}
+  body.mode-dj #rsBottom{order:5;display:flex;gap:8px;align-items:stretch;flex:0 0 auto;}
   body.mode-dj #rsBottom #djSeq{
     flex:1 1 auto;min-width:0;display:block!important;overflow:hidden;
     background:#0c0c14;border:1px solid #23233a;border-radius:10px;padding:5px 4px;
@@ -3673,6 +3673,15 @@ Output the token list now, nothing else:`
     content:'';position:absolute;left:-9px;right:-9px;top:-13px;bottom:-13px;
   }
   body.mode-dj #rsBankDots .rs-bank-name{padding:6px 4px;}
+
+  
+  /* Record panel: 2x2 buttons, half width, two-thirds height */
+  #rsRec{flex:0 0 84px;align-self:center;height:66%;gap:3px;padding:5px 4px;}
+  .rs-rec-pair{display:flex;gap:3px;width:100%;}
+  .rs-rec-pair button{flex:1 1 0;min-width:0;padding:6px 0;font-size:.34rem;}
+  #rsRecTime{font-size:.4rem;}
+  #rsMicDbg{font-size:.26rem;max-height:1.6em;overflow:hidden;}
+  #rsMicLvlWrap{height:5px;}
 
   </style>
 <script>
@@ -5031,10 +5040,31 @@ Output the token list now, nothing else:`
   }
   const pads=document.getElementById('djPads');
   // tapping a dot jumps straight to that bank; tapping the strip advances one
+  /* Hold and drag across the dots to scrub banks — treat the dot strip as a
+     little slider rather than four separate taps. */
+  function dotAt(clientX){
+    const ds=[...dots.querySelectorAll('.rs-dot')];
+    let best=-1, bd=1e9;
+    ds.forEach((d,i)=>{
+      const r=d.getBoundingClientRect(), c=r.left+r.width/2, dist=Math.abs(clientX-c);
+      if(dist<bd){ bd=dist; best=i; }
+    });
+    return bd<44?best:-1;                     // generous slop for a fingertip
+  }
+  let dotDrag=false;
+  dots.addEventListener('touchstart',e=>{
+    const i=dotAt(e.touches[0].clientX);
+    if(i<0) return;
+    dotDrag=true; if(i!==bankIdx) goBank(i);
+  },{passive:true});
+  dots.addEventListener('touchmove',e=>{
+    if(!dotDrag) return;
+    const i=dotAt(e.touches[0].clientX);
+    if(i>=0 && i!==bankIdx) goBank(i);        // live scrub while held
+  },{passive:true});
+  dots.addEventListener('touchend',()=>{ dotDrag=false; },{passive:true});
   dots.addEventListener('click',e=>{
-    const d=e.target.closest('.rs-dot');
-    if(d) goBank([...dots.querySelectorAll('.rs-dot')].indexOf(d));
-    else if(e.target===dots||e.target.classList.contains('rs-bank-name')) goBank(bankIdx+1);
+    if(e.target.classList.contains('rs-bank-name')) goBank(bankIdx+1);
   });
   let sx0=0, sy0=0, swiping=false;
   [pads, pianoArea].filter(Boolean).forEach(t=>{
@@ -5076,21 +5106,28 @@ Output the token list now, nothing else:`
   }
 
   const recRow=document.createElement('div'); recRow.id='rsRec';
-  recRow.innerHTML='<button id="rsMicBtn">🎤</button>'+
-                   '<button id="rsRecBtn">● REC</button>'+
+  recRow.innerHTML='<div class="rs-rec-pair">'+
+                     '<button id="rsMicBtn">🎤</button>'+
+                     '<button id="rsRecBtn">●REC</button>'+
+                   '</div>'+
                    '<div id="rsMicLvlWrap"><div id="rsMicLvl"></div></div>'+
-                   '<span id="rsMicDbg">mic?</span>'+
                    '<span id="rsRecTime">0:00</span>'+
-                   '<button id="rsPlayBack" disabled>▶</button>'+
-                   '<button id="rsShare" disabled>↪ SHARE</button>';
+                   '<div class="rs-rec-pair">'+
+                     '<button id="rsPlayBack" disabled>▶</button>'+
+                     '<button id="rsShare" disabled>↪</button>'+
+                   '</div>'+
+                   '<span id="rsMicDbg"></span>';
   /* recRow is parented into the bottom row further down */
   const recBtn=recRow.querySelector('#rsRecBtn');
   const recTime=recRow.querySelector('#rsRecTime');
   const micLvl=recRow.querySelector('#rsMicLvl');
   const micDbg=recRow.querySelector('#rsMicDbg');
   function dbg(t){ if(micDbg) micDbg.textContent=t; }
-  dbg((window.isSecureContext?'S1':'S0')+(navigator.mediaDevices?'M1':'M0')
-      +' '+location.protocol.replace(':','')+'//'+location.host);
+  // Only diagnose when something is wrong — a healthy origin needs no text,
+  // and the long URL was stretching the whole panel.
+  dbg(window.isSecureContext&&navigator.mediaDevices ? ''
+      : 'S'+(window.isSecureContext?1:0)+'M'+(navigator.mediaDevices?1:0)
+        +' '+location.protocol.replace(':','')+'//'+location.host);
   // If the origin can never grant a mic, say so loudly and permanently.
   if(!window.isSecureContext){
     const warn=document.createElement('div'); warn.id='rsInsecure';
@@ -5100,7 +5137,7 @@ Output the token list now, nothing else:`
   }
   const pbBtn=recRow.querySelector('#rsPlayBack');
   const shBtn=recRow.querySelector('#rsShare');
-  let preview=null, micStream=null, micSrc=null, micAn=null, micBuf=null, micRaf=0;
+  let preview=null, micStream=null, micSrc=null, micAn=null, micBuf=null, micRaf=0, micGain=null;
   const micBtn=recRow.querySelector('#rsMicBtn');
   /* (Re)bind the mic into whatever AudioContext is current. Called on enable
      and again at record time, because djAudioCtx() may have replaced the
@@ -5114,9 +5151,12 @@ Output the token list now, nothing else:`
     if(micSrc && micSrc.context===c) return micSrc;
     try{ micSrc&&micSrc.disconnect(); }catch(e){}
     micSrc=c.createMediaStreamSource(micStream);   // retained: inline nodes get GC'd
+    // You hold the phone away from your mouth while tapping pads, so lift the
+    // input. 1.5x is the most that stays clear of clipping with AGC on.
+    micGain=c.createGain(); micGain.gain.value=1.5;
     micAn=c.createAnalyser(); micAn.fftSize=256;
     micBuf=new Uint8Array(micAn.fftSize);
-    micSrc.connect(micAn);
+    micSrc.connect(micGain); micGain.connect(micAn);
     if(!micRaf) (function meter(){
       if(!micAn){ micRaf=0; return; }
       micAn.getByteTimeDomainData(micBuf);
@@ -5198,8 +5238,8 @@ Output the token list now, nothing else:`
     try{ recorder=new MediaRecorder(recTap.stream, mt?{mimeType:mt}:undefined); }
     catch(e){ recTap=null; return; }
     // mic feeds the tap only — routing it to the speakers would howl
-    const ms=wireMic();
-    if(ms){ try{ ms.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
+    wireMic();
+    if(micGain){ try{ micGain.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
     recChunks=[];
     recorder.ondataavailable=e=>{ if(e.data&&e.data.size) recChunks.push(e.data); };
     recorder.onstop=()=>{
@@ -5222,6 +5262,11 @@ Output the token list now, nothing else:`
 
   pbBtn.addEventListener('click',()=>{
     if(!recBlob) return;
+    // stop the live beat — otherwise the playback sits under the drums
+    if(/Stop|⏹/i.test(realPlay.textContent)){
+      realPlay.click();
+      rsPlay.classList.remove('on'); rsPlay.innerHTML='▶<span>PLAY</span>';
+    }
     if(preview){ preview.pause(); preview=null; pbBtn.textContent='▶'; return; }
     preview=new Audio(URL.createObjectURL(recBlob));
     preview.onended=()=>{ preview=null; pbBtn.textContent='▶'; };
