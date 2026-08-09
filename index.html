@@ -5138,14 +5138,15 @@ Output the token list now, nothing else:`
      in the capture, and nothing about the original audio path changes.    */
   const CAN_REC = !!(window.MediaRecorder && (window.AudioContext||window.webkitAudioContext));
   let recTap=null, recorder=null, recChunks=[], recBlob=null, recT0=0, recTimer=null;
+  let recBeatBus=null;                       // beat feeds this, ducked, not recTap
 
   if(window.AudioNode && AudioNode.prototype && AudioNode.prototype.connect){
     const _connect=AudioNode.prototype.connect;
     AudioNode.prototype.connect=function(d){
       const out=_connect.apply(this,arguments);
       try{
-        if(recTap && d && d.context===recTap.context && d===d.context.destination)
-          _connect.call(this,recTap);
+        if(recBeatBus && d && d.context===recBeatBus.context && d===d.context.destination)
+          _connect.call(this,recBeatBus);   // ducked recording mix, not the tap
       }catch(e){}
       return out;
     };
@@ -5183,7 +5184,8 @@ Output the token list now, nothing else:`
   }
   const pbBtn=recRow.querySelector('#rsPlayBack');
   const shBtn=recRow.querySelector('#rsShare');
-  let preview=null, micStream=null, micSrc=null, micAn=null, micBuf=null, micRaf=0, micGain=null;
+  let preview=null, micStream=null, micSrc=null, micAn=null, micBuf=null, micRaf=0,
+      micGain=null, micComp=null, micOut=null;
   const micBtn=recRow.querySelector('#rsMicBtn');
   /* (Re)bind the mic into whatever AudioContext is current. Called on enable
      and again at record time, because djAudioCtx() may have replaced the
@@ -5199,10 +5201,15 @@ Output the token list now, nothing else:`
     micSrc=c.createMediaStreamSource(micStream);   // retained: inline nodes get GC'd
     // You hold the phone away from your mouth while tapping pads, so lift the
     // input. 1.5x is the most that stays clear of clipping with AGC on.
-    micGain=c.createGain(); micGain.gain.value=1.5;
+    micGain=c.createGain(); micGain.gain.value=2.4;
+    micComp=c.createDynamicsCompressor();
+    micComp.threshold.value=-34; micComp.knee.value=22; micComp.ratio.value=6;
+    micComp.attack.value=0.003;  micComp.release.value=0.22;
+    micOut=c.createGain(); micOut.gain.value=2.2;        // makeup after squash
     micAn=c.createAnalyser(); micAn.fftSize=256;
     micBuf=new Uint8Array(micAn.fftSize);
-    micSrc.connect(micGain); micGain.connect(micAn);
+    micSrc.connect(micGain); micGain.connect(micComp);
+    micComp.connect(micOut); micOut.connect(micAn);      // meter reads post-boost
     if(!micRaf) (function meter(){
       if(!micAn){ micRaf=0; return; }
       micAn.getByteTimeDomainData(micBuf);
@@ -5257,6 +5264,9 @@ Output the token list now, nothing else:`
       dbg('ERR '+n.slice(0,9));
       console.error('[beat-hive] getUserMedia',e); return;
     }
+    // iOS just switched the audio session to PlayAndRecord and ducked output;
+    // re-kick the silent element to pull it back toward playback level
+    try{ if(typeof _iosAudioEl!=='undefined') _iosAudioEl.play().catch(()=>{}); }catch(e){}
     micBtn.classList.add('on'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>'; setLcdName('MIC LIVE');
     const tr=micStream.getAudioTracks()[0];
     // a granted-but-muted track is the classic iOS silent failure
@@ -5279,18 +5289,21 @@ Output the token list now, nothing else:`
     if(!c) return;
     c.resume();
     recTap=c.createMediaStreamDestination();
+    // beat sits under the voice in the capture; speakers are unaffected
+    recBeatBus=c.createGain(); recBeatBus.gain.value=0.45;
+    recBeatBus.connect(recTap);
     const want=['audio/mp4','audio/webm;codecs=opus','audio/webm'];
     const mt=want.find(t=>{ try{ return MediaRecorder.isTypeSupported(t); }catch(e){ return false; } });
     try{ recorder=new MediaRecorder(recTap.stream, mt?{mimeType:mt}:undefined); }
     catch(e){ recTap=null; return; }
     // mic feeds the tap only — routing it to the speakers would howl
     wireMic();
-    if(micGain){ try{ micGain.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
+    if(micOut){ try{ micOut.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
     recChunks=[];
     recorder.ondataavailable=e=>{ if(e.data&&e.data.size) recChunks.push(e.data); };
     recorder.onstop=()=>{
       recBlob=new Blob(recChunks,{type:recorder.mimeType||'audio/mp4'});
-      recTap=null;
+      recTap=null; recBeatBus=null;
       pbBtn.disabled=false; shBtn.disabled=false;
       recTime.textContent=fmt(Date.now()-recT0)+' ✓';
     };
