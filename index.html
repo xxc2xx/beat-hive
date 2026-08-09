@@ -3662,6 +3662,18 @@ Output the token list now, nothing else:`
   }
   #rsInsecure b{color:#fff;}
 
+  
+  /* The dots were a 7px tap target — effectively unhittable. Give each one a
+     padded hit area while keeping the dot itself small. */
+  body.mode-dj #rsBankDots{padding:6px 0;cursor:pointer;}
+  body.mode-dj #rsBankDots .rs-dot{
+    position:relative;flex:0 0 auto;
+  }
+  body.mode-dj #rsBankDots .rs-dot::after{
+    content:'';position:absolute;left:-9px;right:-9px;top:-13px;bottom:-13px;
+  }
+  body.mode-dj #rsBankDots .rs-bank-name{padding:6px 4px;}
+
   </style>
 <script>
 (function(){
@@ -5096,6 +5108,9 @@ Output the token list now, nothing else:`
   function wireMic(){
     if(!micStream) return null;
     const c=djAudioCtx();
+    // A suspended context passes no audio at all, so the analyser reads a flat
+    // zero and the mic looks dead. Tapping the mic before Play left it asleep.
+    if(c.state!=='running') c.resume();
     if(micSrc && micSrc.context===c) return micSrc;
     try{ micSrc&&micSrc.disconnect(); }catch(e){}
     micSrc=c.createMediaStreamSource(micStream);   // retained: inline nodes get GC'd
@@ -5109,7 +5124,9 @@ Output the token list now, nothing else:`
       const lv=Math.min(1,pk/55);
       micBtn.style.boxShadow='0 0 '+(3+lv*18).toFixed(0)+'px rgba(255,120,110,'+(0.2+lv*0.8).toFixed(2)+')';
       if(micLvl) micLvl.style.width=(lv*100).toFixed(0)+'%';
-      if(micDbg && (micRaf&15)===0) micDbg.textContent='pk '+pk;
+      if(micDbg && (micRaf&15)===0)
+        micDbg.textContent='pk '+pk+' '+(micSrc?micSrc.context.state:'-')
+                          +' '+Math.round((micSrc?micSrc.context.sampleRate:0)/1000)+'k';
       micRaf=requestAnimationFrame(meter);
     })();
     return micSrc;
@@ -5122,6 +5139,10 @@ Output the token list now, nothing else:`
     micBtn.classList.remove('on','err'); micBtn.textContent='🎤';
     micBtn.style.boxShadow=''; if(micLvl) micLvl.style.width='0';
   }
+  // iOS suspends the context whenever it likes; nudge it on any interaction
+  ['touchstart','click'].forEach(ev=>document.addEventListener(ev,()=>{
+    if(micStream){ const c=djAudioCtx(); if(c.state!=='running') c.resume(); }
+  },{passive:true,capture:true}));
   micBtn.addEventListener('click',async ()=>{
     if(micStream){ micOff(); return; }
     if(micBtn.classList.contains('err')){           // first tap clears the error
