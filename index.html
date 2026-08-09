@@ -3655,6 +3655,13 @@ Output the token list now, nothing else:`
     text-align:center;line-height:1.4;word-break:break-all;
   }
 
+  
+  #rsInsecure{
+    order:-1;flex:0 0 auto;background:#3a1420;border:1px solid #e8483f;
+    color:#ffb4ae;border-radius:9px;padding:7px 9px;font-size:.6rem;line-height:1.4;
+  }
+  #rsInsecure b{color:#fff;}
+
   </style>
 <script>
 (function(){
@@ -5070,7 +5077,15 @@ Output the token list now, nothing else:`
   const micLvl=recRow.querySelector('#rsMicLvl');
   const micDbg=recRow.querySelector('#rsMicDbg');
   function dbg(t){ if(micDbg) micDbg.textContent=t; }
-  dbg((window.isSecureContext?'S1':'S0')+(navigator.mediaDevices?'M1':'M0'));
+  dbg((window.isSecureContext?'S1':'S0')+(navigator.mediaDevices?'M1':'M0')
+      +' '+location.protocol.replace(':','')+'//'+location.host);
+  // If the origin can never grant a mic, say so loudly and permanently.
+  if(!window.isSecureContext){
+    const warn=document.createElement('div'); warn.id='rsInsecure';
+    warn.innerHTML='⚠ This page is '+location.protocol+'//'+location.host+
+      ' — the mic needs https. Open <b>xxc2xx.github.io/beat-hive/</b>';
+    dj.insertBefore(warn, dj.firstChild);
+  }
   const pbBtn=recRow.querySelector('#rsPlayBack');
   const shBtn=recRow.querySelector('#rsShare');
   let preview=null, micStream=null, micSrc=null, micAn=null, micBuf=null, micRaf=0;
