@@ -4743,7 +4743,9 @@ Output the token list now, nothing else:`
   if(typeof window.djDrum==='function'){
     const _orig=window.djDrum;
     window.djDrum=function(name,when){
-      _orig.apply(this,arguments);
+      if(typeof name==='string' && name.indexOf('chord')===0){
+        playChord(+name.slice(5)||0);
+      } else _orig.apply(this,arguments);
       const st=CHOREO[style]||CHOREO.hiphop;
       let e=0.6, strong=false, light=false;
       if(name==='kick'||name==='subkick'){ e=1.0; strong=true; }
@@ -4855,6 +4857,47 @@ Output the token list now, nothing else:`
       const b=document.createElement('button');
       b.className='dj-preset-btn'; b.dataset.pattern=k; b.textContent=k;
       strip.appendChild(b);
+    });
+  }
+
+
+  /* ══ CHORDS bank — 8 diatonic chords in C, over two octaves ══════
+     Same key as the pentatonic melody pads, so anything played on MELODY
+     sits on top of anything played here. */
+  const CHORD_DEF=[
+    ['C',  0,[0,4,7],    '#ef4444'], ['Dm', 2,[0,3,7],    '#f97316'],
+    ['Em', 4,[0,3,7],    '#eab308'], ['F',  5,[0,4,7],    '#22c55e'],
+    ['G',  7,[0,4,7],    '#06b6d4'], ['Am', 9,[0,3,7],    '#3b82f6'],
+    ['C7', 0,[0,4,7,10], '#8b5cf6'], ['G7', 7,[0,4,7,10], '#ec4899'],
+  ];
+  function playChord(i){
+    const d=CHORD_DEF[i%8], oct=i<8?0:1;
+    const c=djAudioCtx(); c.resume();
+    const t=c.currentTime;
+    const root=130.81*Math.pow(2,(d[1]+oct*12)/12);      // C3 base
+    const g=c.createGain();
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.30/d[2].length,t+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+1.7);
+    g.connect(c.destination);
+    d[2].forEach(iv=>{
+      const f=root*Math.pow(2,iv/12);
+      const o=c.createOscillator(), o2=c.createOscillator();
+      o.type='triangle'; o2.type='sine';
+      o.frequency.value=f; o2.frequency.value=f*2.003;
+      o.connect(g); o2.connect(g);
+      o.start(t); o2.start(t); o.stop(t+1.8); o2.stop(t+1.8);
+    });
+    if(navigator.vibrate) navigator.vibrate(12);
+  }
+  function applyChords(){
+    PAD_EL.forEach((pad,i)=>{
+      const d=CHORD_DEF[i%8];
+      pad.dataset.drum='chord'+i;
+      pad.style.setProperty('--pc',d[3]);
+      const n=pad.querySelector('.dj-pad-name'), r=pad.querySelector('.dj-pad-row');
+      if(n) n.textContent=d[0];
+      if(r) r.textContent=i<8?'LOW':'HIGH';
     });
   }
 
@@ -4987,7 +5030,7 @@ Output the token list now, nothing else:`
 
 
   /* ══ Swipe the pad grid to change bank ═════════════════════════ */
-  const BANKS=['drums','melody','chop','piano'];
+  const BANKS=['drums','melody','chords','chop','piano'];
   let bankIdx=0;
   const dots=document.createElement('div'); dots.id='rsBankDots';
   dots.innerHTML=BANKS.map((b,i)=>'<span class="rs-dot'+(i?'':' on')+'"></span>').join('')+
@@ -5053,12 +5096,15 @@ Output the token list now, nothing else:`
   }
   function goBank(i){
     bankIdx=(i+BANKS.length)%BANKS.length;
-    const isPiano=BANKS[bankIdx]==='piano';
+    const bank=BANKS[bankIdx];
+    const isPiano=bank==='piano', isChord=bank==='chords';
     if(pianoArea) pianoArea.style.display=isPiano?'block':'none';
     pads.style.display=isPiano?'none':'';
     if(!isPiano){
-      const b=dj.querySelector('.dj-bank-btn[data-bank="'+BANKS[bankIdx]+'"]');
-      if(b) b.click();                                  // reuse existing bank switch
+      // CHORDS has no underlying bank button; reset via drums then relabel
+      const b=dj.querySelector('.dj-bank-btn[data-bank="'+(isChord?'drums':bank)+'"]');
+      if(b) b.click();
+      if(isChord) applyChords();
     }
     dots.querySelectorAll('.rs-dot').forEach((d,n)=>d.classList.toggle('on',n===bankIdx));
     document.getElementById('rsBankName').textContent=BANKS[bankIdx].toUpperCase();
