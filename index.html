@@ -5094,21 +5094,9 @@ Output the token list now, nothing else:`
     if(e.target.classList.contains('rs-bank-name')) goBank(bankIdx+1);
   });
   let sx0=0, sy0=0, swiping=false;
-  [pads, pianoArea].filter(Boolean).forEach(t=>{
-    t.addEventListener('touchstart',e=>{
-      sx0=e.touches[0].clientX; sy0=e.touches[0].clientY; swiping=false;
-    },{passive:true});
-    t.addEventListener('touchmove',e=>{
-      const dx=e.touches[0].clientX-sx0, dy=e.touches[0].clientY-sy0;
-      if(Math.abs(dx)>36 && Math.abs(dx)>Math.abs(dy)*1.6) swiping=true;
-    },{passive:true});
-    t.addEventListener('touchend',e=>{
-      if(!swiping) return;
-      const dx=(e.changedTouches[0].clientX-sx0);
-      goBank(bankIdx + (dx<0?1:-1));                    // swipe left = next bank
-      swiping=false;
-    },{passive:true});
-  });
+  /* Bank switching lives on the dot strip only. Swiping across a grid of
+     buttons is inherently ambiguous — every drag begins on a pad, and on the
+     keyboard it stole notes and jumped tabs. */
 
 
   /* ══ RECORD + SHARE ═══════════════════════════════════════════════
@@ -5213,9 +5201,14 @@ Output the token list now, nothing else:`
     micBtn.classList.remove('on','err'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>';
     micBtn.style.boxShadow=''; if(micLvl) micLvl.style.width='0';
   }
-  // iOS suspends the context whenever it likes; nudge it on any interaction
-  ['touchstart','click'].forEach(ev=>document.addEventListener(ev,()=>{
-    if(micStream){ const c=djAudioCtx(); if(c.state!=='running') c.resume(); }
+  // The context starts suspended; every pad tap must be able to wake it,
+  // not just the transport. Capture phase so this runs before pad handlers.
+  ['touchstart','pointerdown','click'].forEach(ev=>document.addEventListener(ev,()=>{
+    try{
+      const c=djAudioCtx();
+      if(c.state!=='running') c.resume();
+      if(typeof _iosAudioEl!=='undefined') _iosAudioEl.play().catch(()=>{});
+    }catch(e){}
   },{passive:true,capture:true}));
   micBtn.addEventListener('click',async ()=>{
     if(micStream){ micOff(); return; }
@@ -5288,7 +5281,7 @@ Output the token list now, nothing else:`
       pbBtn.disabled=false; shBtn.disabled=false;
       recTime.textContent=fmt(Date.now()-recT0)+' ✓';
     };
-    recorder.start();
+    recorder.start(250);   // timeslice: keeps container timing honest
     recT0=Date.now();
     recBtn.classList.add('on'); recBtn.innerHTML='<i>■</i><b>STOP</b>';
     recTimer=setInterval(()=>{ recTime.textContent=fmt(Date.now()-recT0); },250);
@@ -5309,6 +5302,8 @@ Output the token list now, nothing else:`
     }
     if(preview){ preview.pause(); preview=null; pbBtn.innerHTML='<i>▶</i><b>PLAY</b>'; return; }
     preview=new Audio(URL.createObjectURL(recBlob));
+    preview.playbackRate=1;                 // never inherit a stale rate
+    preview.preservesPitch=true;
     preview.onended=()=>{ preview=null; pbBtn.innerHTML='<i>▶</i><b>PLAY</b>'; };
     preview.play(); pbBtn.innerHTML='<i>■</i><b>STOP</b>';
   });
