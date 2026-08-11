@@ -3730,18 +3730,11 @@ Output the token list now, nothing else:`
   body.mode-dj #rsRec #rsMicDbg{font-size:.26rem!important;max-height:2.6em;overflow:hidden;}
 
   
-  /* Dials read as labels unless the affordance is explicit. Chevrons mark the
-     axis, the band gets a caret, and neighbours stay legible (see JS). */
-  body.mode-dj .rs-dial::before{
-    content:'\25B4';                       /* ▴ */
-    top:11px;left:0;right:0;height:auto;background:none;
-    text-align:center;font-size:.5rem;color:#6a5a8a;z-index:5;
-  }
-  body.mode-dj .rs-dial::after{
-    content:'\25BE';                       /* ▾ */
-    bottom:1px;left:0;right:0;height:auto;background:none;
-    text-align:center;font-size:.5rem;color:#6a5a8a;z-index:5;
-  }
+
+  
+  /* The caret rides in the caption, which always renders — the ::before /
+     ::after pseudo-elements are already carrying the fade masks. */
+  body.mode-dj .rs-dial-cap{color:#8f7fb8;letter-spacing:.04em;}
   body.mode-dj .rs-dial-band{
     background:rgba(170,85,204,.18);
     box-shadow:inset 0 0 0 1px rgba(190,120,255,.25);
@@ -4929,7 +4922,7 @@ Output the token list now, nothing else:`
   const WHO1=CHAR_ORDER.map(k=>[k,CHARS[k].name]);
   const WHO2=[['__none','— none —']].concat(WHO1);
   function dialHTML(id,cap,items,sel){
-    return '<div class="rs-dial"><div class="rs-dial-cap">'+cap+'</div>'+
+    return '<div class="rs-dial"><div class="rs-dial-cap">'+cap+' \u25BE</div>'+
       '<div class="rs-dial-band"></div><div class="rs-dial-scroll" id="'+id+'">'+
       items.map(([v,l],i)=>'<div class="rs-dial-item'+(i===sel?' cur':'')+'" data-v="'+v+'">'+l+'</div>').join('')+
       '</div></div>';
@@ -5263,7 +5256,7 @@ Output the token list now, nothing else:`
     micSrc=c.createMediaStreamSource(micStream);   // retained: inline nodes get GC'd
     // You hold the phone away from your mouth while tapping pads, so lift the
     // input. 1.5x is the most that stays clear of clipping with AGC on.
-    micGain=c.createGain(); micGain.gain.value=2.4;
+    micGain=c.createGain(); micGain.gain.value=3.6;
     micComp=c.createDynamicsCompressor();
     micComp.threshold.value=-34; micComp.knee.value=22; micComp.ratio.value=6;
     micComp.attack.value=0.003;  micComp.release.value=0.22;
@@ -5304,8 +5297,9 @@ Output the token list now, nothing else:`
       if(typeof _iosAudioEl!=='undefined') _iosAudioEl.play().catch(()=>{});
     }catch(e){}
   },{passive:true,capture:true}));
+  let micArmed=false;
   micBtn.addEventListener('click',async ()=>{
-    if(micStream){ micOff(); return; }
+    if(micArmed||micStream){ micArmed=false; micOff(); setLcdName('BEAT HIVE'); return; }
     if(micBtn.classList.contains('err')){           // first tap clears the error
       micBtn.classList.remove('err'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>';
       setLcdName('BEAT HIVE'); return;              // tap again to retry
@@ -5321,8 +5315,12 @@ Output the token list now, nothing else:`
     }
     dbg('asking…');
     try{
-      micStream=await navigator.mediaDevices.getUserMedia(
+      // open once to confirm permission, then release immediately so playback
+      // routing is restored until REC actually needs it
+      const probe=await navigator.mediaDevices.getUserMedia(
         {audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
+      probe.getTracks().forEach(t=>t.stop());
+      micArmed=true;
     }catch(e){
       micBtn.classList.add('err'); micBtn.innerHTML='<i>✕</i><b>MIC</b>';
       // name the real failure: NotAllowedError = permission/untrusted cert,
@@ -5335,12 +5333,9 @@ Output the token list now, nothing else:`
     // iOS just switched the audio session to PlayAndRecord and ducked output;
     // re-kick the silent element to pull it back toward playback level
     try{ if(typeof _iosAudioEl!=='undefined') _iosAudioEl.play().catch(()=>{}); }catch(e){}
-    micBtn.classList.add('on'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>'; setLcdName('MIC LIVE');
-    setMicComp(true);      // push our output back up against the iOS duck
-    const tr=micStream.getAudioTracks()[0];
-    // a granted-but-muted track is the classic iOS silent failure
-    dbg(tr?(tr.readyState+(tr.muted?' MUTED':' ok')):'no-track');
-    wireMic();
+    micBtn.classList.add('on'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>';
+    setLcdName('MIC ARMED');
+    dbg('armed');
     (function meter(){
       if(!micAn) return;
       micAn.getByteTimeDomainData(micBuf);
@@ -5353,7 +5348,7 @@ Output the token list now, nothing else:`
 
   function fmt(ms){ const t=Math.floor(ms/1000); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); }
 
-  function startRec(){
+  async function startRec(){
     const c=(typeof djAudioCtx==='function')?djAudioCtx():null;
     if(!c) return;
     c.resume();
@@ -5367,6 +5362,13 @@ Output the token list now, nothing else:`
     try{ recorder=new MediaRecorder(recTap.stream, mt?{mimeType:mt}:undefined); }
     catch(e){ recTap=null; return; }
     // mic feeds the tap only — routing it to the speakers would howl
+    if(micArmed && !micStream){
+      try{
+        micStream=await navigator.mediaDevices.getUserMedia(
+          {audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
+        setMicComp(true);
+      }catch(e){ console.error('[beat-hive] mic',e); }
+    }
     wireMic();
     if(micOut){ try{ micOut.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
     recChunks=[];
@@ -5385,6 +5387,13 @@ Output the token list now, nothing else:`
   function stopRec(){
     clearInterval(recTimer); recTimer=null;
     if(recorder&&recorder.state!=='inactive') recorder.stop();
+    // release the mic so iOS restores normal playback routing
+    if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+    try{ micSrc&&micSrc.disconnect(); }catch(e){}
+    micSrc=null; micAn=null; micGain=null; micComp=null; micOut=null;
+    setMicComp(false);
+    if(micRaf) cancelAnimationFrame(micRaf), micRaf=0;
+    micBtn.style.boxShadow=''; if(micLvl) micLvl.style.width='0';
     recBtn.classList.remove('on'); recBtn.innerHTML='<i>●</i><b>REC</b>';
   }
   recBtn.addEventListener('click',()=>{ recorder&&recorder.state==='recording'?stopRec():startRec(); });
