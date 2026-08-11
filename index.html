@@ -3729,6 +3729,25 @@ Output the token list now, nothing else:`
   body.mode-dj #rsRec #rsRecTime{font-size:.42rem!important;text-align:center!important;}
   body.mode-dj #rsRec #rsMicDbg{font-size:.26rem!important;max-height:2.6em;overflow:hidden;}
 
+  
+  /* Dials read as labels unless the affordance is explicit. Chevrons mark the
+     axis, the band gets a caret, and neighbours stay legible (see JS). */
+  body.mode-dj .rs-dial::before{
+    content:'\25B4';                       /* ▴ */
+    top:11px;left:0;right:0;height:auto;background:none;
+    text-align:center;font-size:.5rem;color:#6a5a8a;z-index:5;
+  }
+  body.mode-dj .rs-dial::after{
+    content:'\25BE';                       /* ▾ */
+    bottom:1px;left:0;right:0;height:auto;background:none;
+    text-align:center;font-size:.5rem;color:#6a5a8a;z-index:5;
+  }
+  body.mode-dj .rs-dial-band{
+    background:rgba(170,85,204,.18);
+    box-shadow:inset 0 0 0 1px rgba(190,120,255,.25);
+  }
+  body.mode-dj .rs-dial-item.cur{font-weight:800;}
+
   </style>
 <script>
 (function(){
@@ -4940,7 +4959,7 @@ Output the token list now, nothing else:`
       const items=sc.children, st=sc.scrollTop;
       for(let n=0;n<items.length;n++){
         const d=Math.abs((n*ITEM - st)/ITEM);
-        const o=Math.round(Math.max(0.15,1-d*0.45)*20)/20;   // quantised
+        const o=Math.round(Math.max(0.38,1-d*0.30)*20)/20;   // neighbours stay legible
         if(items[n].__o!==o){ items[n].__o=o; items[n].style.opacity=String(o); }
       }
       const ci=Math.max(0,Math.min(items.length-1,Math.round(st/ITEM)));
@@ -4980,8 +4999,13 @@ Output the token list now, nothing else:`
       sc.addEventListener('scroll',()=>{ curve(); clearTimeout(t); t=setTimeout(settle,70); });
     }
     sc.addEventListener('click',e=>{
-      const it=e.target.closest('.rs-dial-item'); if(!it) return;
-      sc.scrollTo({top:[...sc.children].indexOf(it)*ITEM,behavior:'smooth'});
+      const it=e.target.closest('.rs-dial-item');
+      const cur=Math.round(sc.scrollTop/ITEM);
+      // tapping the current row advances; tapping a visible neighbour jumps
+      const i=(it && [...sc.children].indexOf(it)!==cur)
+        ? [...sc.children].indexOf(it)
+        : (cur+1)%sc.children.length;
+      sc.scrollTo({top:i*ITEM,behavior:'smooth'});
     });
     const api={el:sc, to:i=>sc.scrollTo({top:i*ITEM,behavior:'smooth'})};
     api.seed=i=>{
