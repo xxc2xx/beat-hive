@@ -3741,6 +3741,19 @@ Output the token list now, nothing else:`
   }
   body.mode-dj .rs-dial-item.cur{font-weight:800;}
 
+  
+  /* Captions matched to the roller text size. Press Start 2P is far too wide
+     to carry "DANCER 1" at this size, so the caption uses the same face as
+     the items it labels. */
+  body.mode-dj .rs-dial-cap{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:.62rem;font-weight:700;letter-spacing:.01em;
+    color:#9d8cc4;top:2px;
+  }
+  body.mode-dj .rs-dial{padding-top:16px;}
+  body.mode-dj .rs-dial-band{top:22px;}
+  body.mode-dj .rs-dial-scroll{padding:6px 0;}
+
   </style>
 <script>
 (function(){
@@ -5353,8 +5366,8 @@ Output the token list now, nothing else:`
     if(!c) return;
     c.resume();
     recTap=c.createMediaStreamDestination();
-    // beat sits under the voice in the capture; speakers are unaffected
-    recBeatBus=c.createGain(); recBeatBus.gain.value=0.45;
+    // beat records at full level; the voice is lifted to sit on top of it
+    recBeatBus=c.createGain(); recBeatBus.gain.value=1.0;
     _rawConnect.call(recBeatBus,recTap);
     _rawConnect.call(masterBus(),recBeatBus);        // pre-compensation tap
     const want=['audio/mp4','audio/webm;codecs=opus','audio/webm'];
