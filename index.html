@@ -5082,7 +5082,7 @@ Output the token list now, nothing else:`
         const c=djAudioCtx(); c.resume();
         const t=c.currentTime, o=c.createOscillator(), o2=c.createOscillator(), g=c.createGain();
         o.type='sine'; o2.type='triangle'; o.frequency.value=f; o2.frequency.value=f*2.004;
-        g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.34,t+0.012);
+        g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.46,t+0.012);
         g.gain.exponentialRampToValueAtTime(0.0001,t+1.3);
         o.connect(g); o2.connect(g); g.connect(c.destination);
         o.start(t); o2.start(t); o.stop(t+1.4); o2.stop(t+1.4);
@@ -5155,15 +5155,38 @@ Output the token list now, nothing else:`
   let recTap=null, recorder=null, recChunks=[], recBlob=null, recT0=0, recTimer=null;
   let recBeatBus=null;                       // beat feeds this, ducked, not recTap
 
+  let preMaster=null, masterOut=null, masterCtx=null;
+  const MIC_COMP=3.0;                    // iOS ducks output to ~1/3 with the mic on
+  function masterBus(){
+    const c=djAudioCtx();
+    if(masterCtx===c && preMaster) return preMaster;
+    masterCtx=c;
+    preMaster=c.createGain(); preMaster.gain.value=1;
+    masterOut=c.createGain(); masterOut.gain.value=micStream?MIC_COMP:1;
+    _rawConnect.call(preMaster,masterOut);
+    _rawConnect.call(masterOut,c.destination);
+    return preMaster;
+  }
+  function setMicComp(on){
+    masterBus();
+    if(masterOut) masterOut.gain.setTargetAtTime(on?MIC_COMP:1,masterCtx.currentTime,0.05);
+  }
+  let _rawConnect=null;
   if(window.AudioNode && AudioNode.prototype && AudioNode.prototype.connect){
-    const _connect=AudioNode.prototype.connect;
+    _rawConnect=AudioNode.prototype.connect;
     AudioNode.prototype.connect=function(d){
-      const out=_connect.apply(this,arguments);
       try{
-        if(recBeatBus && d && d.context===recBeatBus.context && d===d.context.destination)
-          _connect.call(this,recBeatBus);   // ducked recording mix, not the tap
+        if(d && d.context && d===d.context.destination
+           && this!==masterOut && this!==preMaster){
+          const pm=masterBus();                       // redirect: never hit the
+          if(pm && pm.context===d.context){           // destination directly
+            _rawConnect.call(this,pm);
+            if(recBeatBus && recBeatBus.context===d.context) {} // fed from preMaster
+            return pm;
+          }
+        }
       }catch(e){}
-      return out;
+      return _rawConnect.apply(this,arguments);
     };
   }
 
@@ -5244,6 +5267,7 @@ Output the token list now, nothing else:`
     try{ micSrc&&micSrc.disconnect(); }catch(e){}
     if(micStream) micStream.getTracks().forEach(t=>t.stop());
     micStream=null; micSrc=null; micAn=null;
+    setMicComp(false);
     micBtn.classList.remove('on','err'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>';
     micBtn.style.boxShadow=''; if(micLvl) micLvl.style.width='0';
   }
@@ -5288,6 +5312,7 @@ Output the token list now, nothing else:`
     // re-kick the silent element to pull it back toward playback level
     try{ if(typeof _iosAudioEl!=='undefined') _iosAudioEl.play().catch(()=>{}); }catch(e){}
     micBtn.classList.add('on'); micBtn.innerHTML='<i>🎤</i><b>MIC</b>'; setLcdName('MIC LIVE');
+    setMicComp(true);      // push our output back up against the iOS duck
     const tr=micStream.getAudioTracks()[0];
     // a granted-but-muted track is the classic iOS silent failure
     dbg(tr?(tr.readyState+(tr.muted?' MUTED':' ok')):'no-track');
@@ -5311,7 +5336,8 @@ Output the token list now, nothing else:`
     recTap=c.createMediaStreamDestination();
     // beat sits under the voice in the capture; speakers are unaffected
     recBeatBus=c.createGain(); recBeatBus.gain.value=0.45;
-    recBeatBus.connect(recTap);
+    _rawConnect.call(recBeatBus,recTap);
+    _rawConnect.call(masterBus(),recBeatBus);        // pre-compensation tap
     const want=['audio/mp4','audio/webm;codecs=opus','audio/webm'];
     const mt=want.find(t=>{ try{ return MediaRecorder.isTypeSupported(t); }catch(e){ return false; } });
     try{ recorder=new MediaRecorder(recTap.stream, mt?{mimeType:mt}:undefined); }
