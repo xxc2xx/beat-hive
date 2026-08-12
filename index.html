@@ -3754,6 +3754,18 @@ Output the token list now, nothing else:`
   body.mode-dj .rs-dial-band{top:22px;}
   body.mode-dj .rs-dial-scroll{padding:6px 0;}
 
+  
+  /* The original interface paints for a frame or two before setMode('dj')
+     runs. Hide its panels until the DJ class lands — no !important, so the
+     mode-dj rules and the piano's inline display still win afterwards. */
+  body:not(.mode-dj) #noteCard,
+  body:not(.mode-dj) #staffView,
+  body:not(.mode-dj) #metroView,
+  body:not(.mode-dj) #playView,
+  body:not(.mode-dj) #pianoArea,
+  body:not(.mode-dj) #controls,
+  body:not(.mode-dj) #instBar{display:none;}
+
   </style>
 <script>
 (function(){
@@ -5328,11 +5340,9 @@ Output the token list now, nothing else:`
     }
     dbg('asking…');
     try{
-      // open once to confirm permission, then release immediately so playback
-      // routing is restored until REC actually needs it
-      const probe=await navigator.mediaDevices.getUserMedia(
-        {audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
-      probe.getTracks().forEach(t=>t.stop());
+      // Arming is a flag only. Opening the stream — even briefly, just to
+      // check permission — puts iOS into PlayAndRecord and drops playback for
+      // the rest of the session. The prompt now appears at REC instead.
       micArmed=true;
     }catch(e){
       micBtn.classList.add('err'); micBtn.innerHTML='<i>✕</i><b>MIC</b>';
@@ -5378,7 +5388,7 @@ Output the token list now, nothing else:`
     if(micArmed && !micStream){
       try{
         micStream=await navigator.mediaDevices.getUserMedia(
-          {audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
+          {audio:{echoCancellation:true,noiseSuppression:false,autoGainControl:true}});
         setMicComp(true);
       }catch(e){ console.error('[beat-hive] mic',e); }
     }
