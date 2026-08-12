@@ -5198,10 +5198,13 @@ Output the token list now, nothing else:`
   let recBeatBus=null;                       // beat feeds this, ducked, not recTap
 
   let preMaster=null, masterOut=null, masterCtx=null;
-  const MIC_COMP=3.0;                    // iOS ducks output to ~1/3 with the mic on
+  // Kept at 1: gain cannot undo an output ROUTING change, and holding a boost
+  // across the mic closing produced a burst when iOS restored the speaker.
+  const MIC_COMP=1.0;
   function masterBus(){
     const c=djAudioCtx();
-    if(masterCtx===c && preMaster) return preMaster;
+    // rebuild if the context was replaced or closed underneath us
+    if(masterCtx===c && preMaster && masterCtx.state!=='closed') return preMaster;
     masterCtx=c;
     preMaster=c.createGain(); preMaster.gain.value=1;
     masterOut=c.createGain(); masterOut.gain.value=micStream?MIC_COMP:1;
@@ -5265,11 +5268,24 @@ Output the token list now, nothing else:`
   const pbBtn=recRow.querySelector('#rsPlayBack');
   const shBtn=recRow.querySelector('#rsShare');
   let preview=null, micStream=null, micSrc=null, micAn=null, micBuf=null, micRaf=0,
-      micGain=null, micComp=null, micOut=null;
+      micGain=null, micComp=null, micOut=null, micHP=null;
   const micBtn=recRow.querySelector('#rsMicBtn');
   /* (Re)bind the mic into whatever AudioContext is current. Called on enable
      and again at record time, because djAudioCtx() may have replaced the
      context in between — cross-context connect() throws. */
+  // Safari parks contexts in 'interrupted' after calls, alarms and <audio>
+  // playback. Recover automatically rather than waiting for the next tap.
+  (function watchCtx(){
+    try{
+      const c=djAudioCtx();
+      if(c && !c.__rsWatched){
+        c.__rsWatched=true;
+        c.addEventListener('statechange',()=>{ if(c.state!=='running') c.resume().catch(()=>{}); });
+      }
+    }catch(e){}
+    setTimeout(watchCtx,1500);
+  })();
+
   function wireMic(){
     if(!micStream) return null;
     const c=djAudioCtx();
@@ -5282,13 +5298,15 @@ Output the token list now, nothing else:`
     // You hold the phone away from your mouth while tapping pads, so lift the
     // input. 1.5x is the most that stays clear of clipping with AGC on.
     micGain=c.createGain(); micGain.gain.value=3.6;
+    micHP=c.createBiquadFilter();            // kill handling rumble and mains hum
+    micHP.type='highpass'; micHP.frequency.value=95; micHP.Q.value=0.7;
     micComp=c.createDynamicsCompressor();
     micComp.threshold.value=-34; micComp.knee.value=22; micComp.ratio.value=6;
     micComp.attack.value=0.003;  micComp.release.value=0.22;
     micOut=c.createGain(); micOut.gain.value=2.2;        // makeup after squash
     micAn=c.createAnalyser(); micAn.fftSize=256;
     micBuf=new Uint8Array(micAn.fftSize);
-    micSrc.connect(micGain); micGain.connect(micComp);
+    micSrc.connect(micGain); micGain.connect(micHP); micHP.connect(micComp);
     micComp.connect(micOut); micOut.connect(micAn);      // meter reads post-boost
     if(!micRaf) (function meter(){
       if(!micAn){ micRaf=0; return; }
@@ -5388,7 +5406,7 @@ Output the token list now, nothing else:`
     if(micArmed && !micStream){
       try{
         micStream=await navigator.mediaDevices.getUserMedia(
-          {audio:{echoCancellation:true,noiseSuppression:false,autoGainControl:true}});
+          {audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
         setMicComp(true);
       }catch(e){ console.error('[beat-hive] mic',e); }
     }
@@ -5432,6 +5450,11 @@ Output the token list now, nothing else:`
     preview=new Audio(URL.createObjectURL(recBlob));
     preview.playbackRate=1;                 // never inherit a stale rate
     preview.preservesPitch=true;
+    // iOS can park the AudioContext in 'interrupted' while an <audio> element
+    // plays; without this the pads stay silent until a reload.
+    const wake=()=>{ try{ const c=djAudioCtx(); if(c.state!=='running') c.resume(); }catch(e){} };
+    preview.addEventListener('ended',wake);
+    preview.addEventListener('pause',wake);
     preview.onended=()=>{ preview=null; pbBtn.innerHTML='<i>▶</i><b>PLAY</b>'; };
     preview.play(); pbBtn.innerHTML='<i>■</i><b>STOP</b>';
   });
