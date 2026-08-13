@@ -5330,6 +5330,7 @@ Output the token list now, nothing else:`
     return micSrc;
   }
   function micOff(){
+    reclaimPlaybackVolume();
     if(micRaf) cancelAnimationFrame(micRaf), micRaf=0;
     try{ micSrc&&micSrc.disconnect(); }catch(e){}
     if(micStream) micStream.getTracks().forEach(t=>t.stop());
@@ -5459,6 +5460,25 @@ Output the token list now, nothing else:`
     if(micRaf) cancelAnimationFrame(micRaf), micRaf=0;
     micBtn.style.boxShadow=''; if(micLvl) micLvl.style.width='0';
     recBtn.classList.remove('on'); recBtn.innerHTML='<i>●</i><b>REC</b>';
+    reclaimPlaybackVolume();
+  }
+
+  /* Stopping the mic tracks does not make iOS re-evaluate the audio session
+     category — that only happens when playback STARTS. The silent unlock
+     element has been looping since launch, so simply closing the mic never
+     gives it a fresh start to renegotiate against. Restart it explicitly,
+     twice with a short gap, which is what reliably re-triggers the switch
+     back to the loud/ambient category in testing on other apps with this
+     same iOS quirk. */
+  function reclaimPlaybackVolume(){
+    try{
+      if(typeof _iosAudioEl==='undefined') return;
+      _iosAudioEl.pause(); _iosAudioEl.currentTime=0;
+      const kick=()=>{ _iosAudioEl.play().catch(()=>{}); };
+      kick();
+      setTimeout(kick,180);
+      setTimeout(kick,600);
+    }catch(e){}
   }
   recBtn.addEventListener('click',()=>{ recorder&&recorder.state==='recording'?stopRec():startRec(); });
 
