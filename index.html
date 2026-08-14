@@ -5348,16 +5348,16 @@ Output the token list now, nothing else:`
       if(typeof _iosAudioEl!=='undefined') _iosAudioEl.play().catch(()=>{});
     }catch(e){}
   },{passive:true,capture:true}));
-  let micArmed=false, micHeadphones=false;
+  let micArmed=false, micEchoCancel=false;      // default: no duck, ever
   let micLongPress=null;
   micBtn.addEventListener('touchstart',()=>{
     micLongPress=setTimeout(()=>{
-      micHeadphones=!micHeadphones;
+      micEchoCancel=!micEchoCancel;
       micLongPress=null;
       if(navigator.vibrate) navigator.vibrate([10,30,10]);
-      setLcdName(micHeadphones?'HEADPHONES ON':'HEADPHONES OFF');
-      micBtn.classList.toggle('headphones',micHeadphones);
-      micBtn.querySelector('i').textContent=micHeadphones?'🎧':'🎤';
+      setLcdName(micEchoCancel?'ECHO CANCEL ON':'ECHO CANCEL OFF');
+      micBtn.classList.toggle('headphones',micEchoCancel);
+      micBtn.querySelector('i').textContent=micEchoCancel?'🎧':'🎤';
     },520);
   },{passive:true});
   micBtn.addEventListener('touchend',()=>{ if(micLongPress) clearTimeout(micLongPress); },{passive:true});
@@ -5425,11 +5425,13 @@ Output the token list now, nothing else:`
     // mic feeds the tap only — routing it to the speakers would howl
     if(micArmed && !micStream){
       try{
-        // On headphones there is no acoustic path from speaker to mic, so
-        // echo cancellation buys nothing — turning it off keeps iOS on the
-        // plain audio route instead of the ducking voice-processing one.
+        // Default OFF: keeps iOS off the voice-processing route entirely, so
+        // playback never ducks, at any volume. Trade-off is the mic can pick
+        // up some of the beat straight from the speaker — long-press the mic
+        // button to opt into cancellation if a clean recording matters more
+        // than a steady live volume.
         micStream=await navigator.mediaDevices.getUserMedia(
-          {audio:{echoCancellation:!micHeadphones,noiseSuppression:true,
+          {audio:{echoCancellation:micEchoCancel,noiseSuppression:true,
                   autoGainControl:true}});
         setMicComp(true);
       }catch(e){ console.error('[beat-hive] mic',e); }
