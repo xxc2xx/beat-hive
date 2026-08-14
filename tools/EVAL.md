@@ -18,6 +18,46 @@ first, and because the same *kinds* of mistake kept recurring.
 | 8 | `settle()` fired twice | 1 | Own `scrollTop` write re-entered it | qa-validator agent |
 | 9 | Dancer 2 never appeared | 1 | `seed()` never called `onPick` | Roster-derived defaults check |
 | 10 | **Mic silent** | **4** | **Four different causes, stacked** | On-screen diagnostic |
+| 11 | Pads/piano silent on load | 1 | Context only resumed via the mic path | Resume on any touch, capture phase |
+| 12 | Swipe hijacked pad taps and piano notes | 1 | Gesture is inherently ambiguous on a button grid | Removed; dot strip only |
+| 13 | Replay speed random (fast/slow) | 1 | No `MediaRecorder` timeslice; bad Safari duration metadata | 250ms timeslice |
+| 14 | Dial read as a static label | 1 | Neighbours faded to near-0 opacity | Min opacity raised; tap-to-advance added |
+| 15 | Chevron CSS rendered nothing | 1 | Rule overwrote the fade-mask pseudo-elements it needed | Caret moved into caption text |
+| 16 | Captions unreadably small | 1 | Press Start 2P too wide at roller-text size | Switched face for captions only |
+| 17 | Recorded beat quieter than intended | 1 | Duck added without being asked for | Removed; beat records at 1.0 |
+| 18 | **Mic open drops live playback** | **3** | **iOS voice-processing route, not a level** | No full fix on speaker — opt-in toggle |
+| 19 | Silence persists after replay, needs reload | 1 | Master bus cached against a context Safari parked as `interrupted` | Bus rebuilds; `statechange` auto-resume |
+| 20 | Volume burst right after mic closes | 1 | 3x compensation held across a routing change that had already reverted | Compensation dropped — proven useless earlier, left in anyway |
+| 21 | Doubled snare in recordings | 1 | Mic re-recording the beat off the speaker (no echo cancellation) | Cancellation re-enabled — traded back against #18 |
+| 22 | Handling noise / hum in recordings | 1 | No high-pass before the compressor amplified everything | 95Hz high-pass added to the mic chain |
+| 23 | `ReferenceError` on REC after a rename | 1 | One call site missed in a variable rename | Caught pre-push by execution test |
+| 24 | Pitch Trainer UI flashes before DJ mode applies | 1 | Original panels visible for a frame before `setMode('dj')` runs | Hidden until `.mode-dj` lands |
+
+## #18 deserves its own writeup — it's not actually fixed
+
+Bugs 18 and 21 are the **same OS decision, opposite failure mode**, and three
+rounds were spent trying to have both before the right question got asked.
+
+`echoCancellation:true` doesn't set a volume — it switches iOS onto its
+voice-processing audio route (the one phone calls use), and duck-while-mic-
+open is a property of *that route*, not a gain stage. Nothing downstream —
+not 1.5x, not 3x, not a compressor — can undo a routing decision made above
+the Web Audio graph. Two rounds were spent trying anyway (#18's first two
+attempts) before accepting that gain was the wrong tool for a routing
+problem.
+
+`echoCancellation:false` avoids the route and the duck, but the mic now
+physically hears the beat coming out of the speaker a few milliseconds
+late — bug #21, the doubled snare.
+
+**These are not independently fixable.** One boolean controls both. The
+project's answer, once asked directly: default `false` — keep the live
+volume constant, always, and accept the recording may carry some bleed of
+the beat. That is a product decision (this app is for jamming together, not
+archival audio), not an engineering one, and it only got made after guessing
+at a "compromise" level for two rounds first. The lesson isn't in the code —
+it's that *whose priority is this* should have been asked before *how do I
+balance it*.
 
 ## The mic, in detail
 
@@ -68,6 +108,16 @@ change registered as a failure. Rewritten to derive the expected dial index
 from the roster, it now validates the real invariant (dial seed = roster index
 + 1, accounting for the "none" entry) instead of a specific name.
 
+## Pattern added this round: confident wrong explanations
+
+Bug #18's proportional-duck theory ("iOS ducks harder the louder you talk")
+was stated as fact in conversation before it was corrected. It was a
+plausible-sounding mechanism pattern-matched from general AEC behaviour, not
+something confirmed for this platform — no console access exists to this
+user's phone, so nothing here can actually be verified against device logs.
+Corrected when challenged, but should have been hedged the first time:
+*"most likely explanation, unverifiable from here"* rather than stated flat.
+
 ## Bugs inherited from the original app
 
 Two were pre-existing in `pitch-trainer/index.html`, not introduced here:
@@ -77,6 +127,26 @@ Two were pre-existing in `pitch-trainer/index.html`, not introduced here:
   Still present upstream.
 - **iOS fires synthetic mouse events after touch**, so a desktop mouse fallback
   double-fired the bank switch on every swipe.
+
+## What "recording and evaluating bugs" actually means here
+
+There is no automated bug tracker. Two things happen, and only one is
+automatic:
+
+1. **`node tools/qc.js` runs before every push** — 15 structural/execution
+   checks, real code, fails the build. This is the only part that isn't me
+   remembering to do something.
+2. **This file is written by hand, from conversation, when asked.** It went
+   19 entries stale between the sprite-bug wave and this update because
+   nobody asked in between. That gap is the honest answer to "how do you
+   make sure this stays current" — it doesn't, unless it's kept up each
+   session rather than in a catch-up pass like this one.
+
+The useful part isn't the table. It's asking, after every fix: *does this
+generalize into a check, or is it a one-off that needs a written-down
+reason it can't be checked?* Bugs 18/20's answer was the latter — no CSS
+rule or execution test catches "we chose the wrong tradeoff," only a
+product decision does.
 
 ## What the gate runs
 
