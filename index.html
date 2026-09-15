@@ -3499,6 +3499,14 @@ Output the token list now, nothing else:`
      In full-height DJ mode the grid owns both axes. */
   body.mode-dj .dj-pad{aspect-ratio:auto;min-width:0;min-height:0;}
   body.mode-dj #djPads{width:100%;max-width:100%;overflow:hidden;}
+  /* #djPads is flex:1 (from the base stylesheet) so on a tall viewport it
+     stretches to fill all remaining vertical space, and grid-template-rows:
+     repeat(4,1fr) then divides that entire height into 4 equal rows —
+     4 pads become huge elongated rectangles instead of near-square. A
+     container-level aspect-ratio caps the grid's own height relative to its
+     width without touching the per-pad rule above (still needed to avoid
+     the spill), so height stops growing once a sane cap is reached. */
+  body.mode-dj #djPads{flex:0 1 auto;aspect-ratio:1/0.85;max-height:min(56vh,420px);}
 
   /* Roller detent pop */
   .rs-dial-item.pop{animation:rsPop .13s ease-out;}
