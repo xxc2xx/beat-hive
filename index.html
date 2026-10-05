@@ -504,6 +504,8 @@
     <p class="hint" id="hint">Tap Start, then sing or play any note</p>
   </div>
 
+  <script src="music-core.js"></script>
+  <script src="hear.js"></script>
   <script>
   // ── iOS audio unlock ──────────────────────────────────────────────────
   // iOS Safari suspends every new AudioContext until the page has received
@@ -5087,7 +5089,7 @@ Output the token list now, nothing else:`
 
 
   /* ══ Swipe the pad grid to change bank ═════════════════════════ */
-  const BANKS=['drums','melody','chords','chop','piano'];
+  const BANKS=['drums','melody','chords','song','chop','piano'];
   let bankIdx=0;
   const dots=document.createElement('div'); dots.id='rsBankDots';
   dots.innerHTML=BANKS.map((b,i)=>'<span class="rs-dot'+(i?'':' on')+'"></span>').join('')+
@@ -5154,14 +5156,16 @@ Output the token list now, nothing else:`
   function goBank(i){
     bankIdx=(i+BANKS.length)%BANKS.length;
     const bank=BANKS[bankIdx];
-    const isPiano=bank==='piano', isChord=bank==='chords';
+    const isPiano=bank==='piano', isChord=bank==='chords', isSong=bank==='song';
+    if(!isSong&&window.__songBank) window.__songBank.leave();
     if(pianoArea) pianoArea.style.display=isPiano?'block':'none';
     pads.style.display=isPiano?'none':'';
     if(!isPiano){
       // CHORDS has no underlying bank button; reset via drums then relabel
-      const b=dj.querySelector('.dj-bank-btn[data-bank="'+(isChord?'drums':bank)+'"]');
+      const b=dj.querySelector('.dj-bank-btn[data-bank="'+((isChord||isSong)?'drums':bank)+'"]');
       if(b) b.click();
       if(isChord) applyChords();
+      if(isSong&&window.__songBank) window.__songBank.enter();
     }
     dots.querySelectorAll('.rs-dot').forEach((d,n)=>d.classList.toggle('on',n===bankIdx));
     document.getElementById('rsBankName').textContent=BANKS[bankIdx].toUpperCase();
@@ -5210,6 +5214,7 @@ Output the token list now, nothing else:`
      in the capture, and nothing about the original audio path changes.    */
   const CAN_REC = !!(window.MediaRecorder && (window.AudioContext||window.webkitAudioContext));
   let recTap=null, recorder=null, recChunks=[], recBlob=null, recT0=0, recTimer=null;
+  let voiceRec=null, voiceChunks=[];   // raw mic only — the SONG bank turns it into notes
   let recBeatBus=null;                       // beat feeds this, ducked, not recTap
 
   let preMaster=null, masterOut=null, masterCtx=null;
@@ -5446,6 +5451,19 @@ Output the token list now, nothing else:`
     }
     wireMic();
     if(micOut){ try{ micOut.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
+    // A second recorder on the raw mic: the mix has drums in it, which wreck
+    // note transcription. Kept in memory for the SONG bank picker.
+    voiceRec=null; voiceChunks=[];
+    if(micStream){
+      try{
+        voiceRec=new MediaRecorder(micStream, mt?{mimeType:mt}:undefined);
+        voiceRec.ondataavailable=e=>{ if(e.data&&e.data.size) voiceChunks.push(e.data); };
+        const vr=voiceRec;
+        vr.onstop=()=>{ window.__bhVoice={ blob:new Blob(voiceChunks,{type:vr.mimeType||'audio/mp4'}),
+                                           bpm:djBpm, at:Date.now() }; };
+        voiceRec.start(250);
+      }catch(e){ voiceRec=null; }
+    }
     recChunks=[];
     recorder.ondataavailable=e=>{ if(e.data&&e.data.size) recChunks.push(e.data); };
     recorder.onstop=()=>{
@@ -5462,6 +5480,7 @@ Output the token list now, nothing else:`
   function stopRec(){
     clearInterval(recTimer); recTimer=null;
     if(recorder&&recorder.state!=='inactive') recorder.stop();
+    if(voiceRec&&voiceRec.state!=='inactive') voiceRec.stop();   // before the tracks die
     // release the mic so iOS restores normal playback routing
     if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
     try{ micSrc&&micSrc.disconnect(); }catch(e){}
@@ -5584,6 +5603,143 @@ Output the token list now, nothing else:`
     const b=e.target.closest('.dj-bank-btn');
     if(b) document.getElementById('rsBank').textContent=b.textContent.trim();
   });
+})();
+</script>
+<script>
+/* ══ Music ecosystem bridge — shared with pitch-trainer ═══════════════
+   music-core.js / hear.js are vendored from ~/pitch-trainer (tools/sync-core.sh
+   there). Same origin on GitHub Pages → same IndexedDB, so songs made in
+   either app show up in both.
+   - MELODY pads take the shared colour palette (red is always C / Do)
+   - SONG bank: pick a song → its notes become the pads, the next pad to hit
+     glows (wait mode — nothing moves until it's hit, no penalty for misses)
+   - "My last recording" turns the raw-mic take into a song, on device      */
+(function(){
+  const MC=window.MusicCore;
+  if(!MC||typeof djDrum!=='function') return;
+
+  // ── MELODY pads → shared palette ──────────────────────────────────────
+  if(typeof MELODY_PADS!=='undefined')
+    MELODY_PADS.forEach(p=>{ p[3]=MC.colorOf(Math.round(MC.freqToMidiFloat(p[2]))); });
+
+  const css=document.createElement('style');
+  css.textContent=`
+  .dj-pad.sb-guide{animation:sbGuide .8s ease-in-out infinite;z-index:2;}
+  @keyframes sbGuide{0%,100%{box-shadow:0 0 0 3px #fff,0 0 12px var(--pc);}50%{box-shadow:0 0 0 5px #fff,0 0 30px var(--pc);transform:scale(1.04);}}
+  .dj-pad.sb-off{opacity:.18;}
+  #sbPick{position:fixed;inset:0;z-index:80;background:rgba(6,6,16,.92);display:flex;flex-direction:column;
+    align-items:center;padding:18px 14px;gap:10px;overflow:auto;}
+  #sbPick h2{color:#fff;font-size:1rem;margin:4px 0;}
+  #sbPick .sb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;width:100%;max-width:560px;}
+  #sbPick button{background:#16213e;border:2px solid #2a2a55;color:#e6e6f5;border-radius:12px;padding:12px 6px;
+    font-weight:700;font-size:.78rem;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;}
+  #sbPick button .ic{font-size:1.7rem;}
+  #sbPick button.sb-voice{border-color:#e94560;}
+  #sbPick .sb-x{background:transparent;border:none;color:#7a7aa8;}
+  #sbToast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:81;background:#1e1e3a;color:#fff;
+    padding:8px 14px;border-radius:20px;font-size:.8rem;font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.5);display:none;}`;
+  document.head.appendChild(css);
+  const toast=document.createElement('div'); toast.id='sbToast'; document.body.appendChild(toast);
+  let toastT=0;
+  function say(t,ms){ toast.textContent=t; toast.style.display='block'; clearTimeout(toastT);
+                      if(ms!==0) toastT=setTimeout(()=>{toast.style.display='none';},ms||2500); }
+
+  const PADS=()=>[...document.querySelectorAll('.dj-pad')];
+  let take=null, pitches=[], line=[], idx=0, active=false;
+
+  function layout(){
+    // distinct pitches low→high; >16 keeps the 16 most used
+    const count=new Map(); line.forEach(n=>count.set(n.m,(count.get(n.m)||0)+1));
+    pitches=[...count.keys()].sort((a,b)=>count.get(b)-count.get(a)).slice(0,16).sort((a,b)=>a-b);
+    PADS().forEach((pad,i)=>{
+      const m=pitches[i], nm=pad.querySelector('.dj-pad-name'), rw=pad.querySelector('.dj-pad-row');
+      pad.classList.remove('sb-guide');
+      if(m==null){ pad.dataset.drum='songX'; pad.classList.add('sb-off'); if(nm) nm.textContent='·'; if(rw) rw.textContent=''; return; }
+      pad.classList.remove('sb-off');
+      pad.dataset.drum='song'+i;
+      pad.style.setProperty('--pc',MC.colorOf(m));
+      if(nm) nm.textContent=MC.label(m,'solfege');
+      if(rw) rw.textContent=MC.midiName(m);
+    });
+    idx=0; guide();
+  }
+  function guide(){
+    PADS().forEach(p=>p.classList.remove('sb-guide'));
+    if(!active||idx>=line.length) return;
+    const i=pitches.indexOf(line[idx].m);
+    const pad=PADS()[i]; if(pad) pad.classList.add('sb-guide');
+  }
+  function playSongPad(i,when){
+    const m=pitches[i]; if(m==null) return;
+    const ctx=djAudioCtx(), t=when==null?ctx.currentTime:when, f=MC.midiToFreq(m);
+    const o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain();
+    o.type='sine'; o2.type='triangle'; o.frequency.value=f; o2.frequency.value=f*2.005;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.38,t+0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+1.2);
+    o.connect(g); o2.connect(g); g.connect(ctx.destination);   // patched connect → master + REC tap
+    o.start(t); o2.start(t); o.stop(t+1.25); o2.stop(t+1.25);
+    if(when==null&&active&&idx<line.length&&m===line[idx].m){
+      idx++; guide();
+      if(idx>=line.length) celebrate();
+    }
+  }
+  function celebrate(){
+    say('🎉 You played '+take.title+'!',3500);
+    PADS().forEach((p,i)=>setTimeout(()=>{ p.classList.add('flash'); setTimeout(()=>p.classList.remove('flash'),180); },i*45));
+    setTimeout(()=>{ idx=0; guide(); },2200);
+  }
+
+  // every pad hit funnels through djDrum — route the SONG pads
+  const _dd=window.djDrum;
+  window.djDrum=function(name,when){
+    if(typeof name==='string'&&name.startsWith('song')){
+      if(name!=='songX') playSongPad(+name.slice(4),when);
+      return;
+    }
+    return _dd.apply(this,arguments);
+  };
+
+  async function useTake(t){
+    take=t; line=MC.skyline(t.notes); active=true; layout();
+    say('🎵 '+t.title+' — follow the glowing pad',2500);
+  }
+  async function fromVoice(){
+    const v=window.__bhVoice; if(!v||!window.Hear) return;
+    say('👂 Listening to your recording… 0%',0);
+    try{
+      const t=await Hear.transcribeBlob(v.blob,{bpm:v.bpm,source:'beat-hive',snap:true,grid:0.5,
+        onProgress:p=>say('👂 Listening to your recording… '+Math.round(p*100)+'%',0)});
+      if(t.notes.length<2){ say('Couldn’t hear notes in that one — try singing louder',3500); return; }
+      let n=1; try{ n=(await MC.store.listTakes()).filter(x=>x.source==='beat-hive').length+1; }catch(e){}
+      t.title='Beat Hive song '+n;
+      try{ t.audioId='aud_'+t.id; await MC.store.saveAudio(t.audioId,v.blob); await MC.store.saveTake(t); }catch(e){}
+      useTake(t);
+    }catch(e){ say('Could not read the recording: '+e.message,4000); }
+  }
+  async function pick(){
+    let mine=[]; try{ mine=await MC.store.listTakes(); }catch(e){}
+    const all=[...mine.filter(t=>t.notes&&t.notes.length),...MC.builtinTakes()];
+    const ov=document.createElement('div'); ov.id='sbPick';
+    const btn=(t,i)=>'<button data-i="'+i+'"><span class="ic">'+(t.icon||(t.tag==='class'?'🎒':t.source==='sing'?'🎤':'🎵'))+
+      '</span>'+String(t.title).replace(/[<>&]/g,'')+'</button>';
+    ov.innerHTML='<h2>Pick a song for the pads</h2><div class="sb-grid">'+
+      (window.__bhVoice?'<button class="sb-voice" data-v="1"><span class="ic">🎤</span>My last recording</button>':'')+
+      all.map(btn).join('')+'</div>'+(take?'<button class="sb-x" data-k="1">keep '+String(take.title).replace(/[<>&]/g,'')+'</button>':'')+
+      '<button class="sb-x" data-x="1">✕ close</button>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{
+      const b=e.target.closest('button'); if(!b) return;
+      ov.remove();
+      if(b.dataset.v) fromVoice();
+      else if(b.dataset.i!=null) useTake(all[+b.dataset.i]);
+      else if(b.dataset.k){ active=true; layout(); }
+    });
+  }
+
+  window.__songBank={
+    enter(){ if(take){ active=true; layout(); } pick(); },
+    leave(){ active=false; PADS().forEach(p=>p.classList.remove('sb-guide','sb-off')); },
+  };
 })();
 </script>
 <script>

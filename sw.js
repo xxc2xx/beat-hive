@@ -1,4 +1,4 @@
-const CACHE = 'pitch-v15';
+const CACHE = 'pitch-v16';
 const STATIC = ['./icon-192.png', './icon-512.png', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -21,7 +21,8 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   // Always fetch HTML fresh so app updates are picked up immediately
-  if (url.pathname.endsWith('.html') || url.pathname.endsWith('/') || url.pathname === '') {
+  // HTML and the vendored JS modules always fresh (they ship in lockstep)
+  if (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname.endsWith('/') || url.pathname === '') {
     e.respondWith(
       fetch(e.request).catch(() => caches.match(e.request))
     );

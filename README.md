@@ -17,6 +17,12 @@ pick who dances on the LCD, record yourself over the top, and share it.
 - **Record + share** — capture the mix (with your voice, if you enable the mic)
   and send it straight to the iOS share sheet
 - **Step sequencer** and a scratch deck, swipeable to save space
+- **SONG bank** — pick a song (built-in, or one made in
+  [Pitch Trainer](https://xxc2xx.github.io/pitch-trainer/)) and its notes
+  become the pads; the next pad to hit glows. "My last recording" turns your
+  raw mic take into a song on-device. Shares storage with Pitch Trainer
+  (same origin), using vendored `music-core.js` / `hear.js` — edit those in
+  `~/pitch-trainer` and run its `tools/sync-core.sh`.
 
 ## Running locally
 

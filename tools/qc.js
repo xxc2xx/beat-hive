@@ -97,5 +97,18 @@ orphan.length?bad('orphan CSS for removed elements: '+orphan):ok('no orphan layo
 try{ require('child_process').execFileSync('node',[__dirname+'/exec-check.js',F],{stdio:'inherit'}); }
 catch(e){ fail++; }
 
+// 12 ── vendored shared modules: present, loaded, and identical to the
+//       pitch-trainer source when that repo is checked out next door
+{ const path=require('path'), dir=path.dirname(F), src=path.join(dir,'..','pitch-trainer');
+  ['music-core.js','hear.js'].forEach(f=>{
+    const mine=path.join(dir,f);
+    if(!fs.existsSync(mine)){ bad('vendored '+f+' missing'); return; }
+    if(!h.includes('<script src="'+f+'"></script>')){ bad(f+' not loaded by index.html'); return; }
+    const theirs=path.join(src,f);
+    if(!fs.existsSync(theirs)){ ok(f+' vendored (pitch-trainer not checked out — drift not checked)'); return; }
+    fs.readFileSync(mine,'utf8')===fs.readFileSync(theirs,'utf8')
+      ? ok(f+' matches ~/pitch-trainer') : bad(f+' drifted from ~/pitch-trainer — run pitch-trainer/tools/sync-core.sh');
+  }); }
+
 console.log(fail?'\n'+fail+' FAILURE(S)':'\nQC PASS');
 process.exit(fail?1:0);
