@@ -5753,6 +5753,8 @@ Output the token list now, nothing else:`
       }
       ov.remove();
       if(mySession!==session) return;
+      // closed without a song: don't leave half-switched SONG pads — back to drums
+      if(b.dataset.x&&!take&&window.__goBank){ window.__goBank(0); return; }
       if(b.dataset.v) fromVoice();
       else if(b.dataset.i!=null) useTake(all[+b.dataset.i]);
       else if(b.dataset.k){ active=true; layout(); }
@@ -5789,13 +5791,16 @@ Output the token list now, nothing else:`
       const ctx=djAudioCtx();
       // no tap yet → audio is suspended: still light the pads and move the
       // guide (silently), and ask for the one tap that turns sound on
-      if(ctx.state!=='running'){ ctx.resume().catch(()=>{}); if(ctx.state!=='running') say('🔇 tap the screen once to hear the keyboard',2500); }
+      let silent=false;
+      if(ctx.state!=='running'){ ctx.resume().catch(()=>{}); if(ctx.state!=='running'){ silent=true; say('🔇 tap the screen once to hear the keyboard',2500); } }
       const i=active?pitches.indexOf(m):-1;
       if(i>=0){
         const pad=PADS()[i];
         if(pad){ pad.classList.add('flash'); setTimeout(()=>pad.classList.remove('flash'),140); }
-        playSongPad(i);                           // also advances the glowing guide
-      } else playPitch(m);
+        // paused audio: don't queue sound (it would all burst out on unlock) — just move the guide
+        if(silent){ if(active&&idx<line.length&&m===line[idx].m){ idx++; guide(); if(idx>=line.length) celebrate(); } }
+        else playSongPad(i);                      // plays + advances the glowing guide
+      } else if(!silent) playPitch(m);
     });
     Midi.autoConnect();                           // same origin as Pitch Trainer: permission carries over
   }
