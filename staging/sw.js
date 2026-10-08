@@ -1,4 +1,9 @@
-const CACHE = 'staging-pitch-v16';
+const CACHE = 'staging-bh-v18';
+// Both apps live on xxc2xx.github.io and share Cache Storage: only ever
+// delete OUR caches (same prefix) plus the old shared 'pitch-vN' names both
+// apps used before they had their own prefixes.
+const PREFIX = CACHE.replace(/v\d+$/, '');
+
 const STATIC = ['./icon-192.png', './icon-512.png', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -12,7 +17,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && (k.startsWith(PREFIX) || /^(staging-)?pitch-v\d+$/.test(k))).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -20,11 +25,15 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
+  // Revalidate with the server every time (cheap ETag check): the HTTP
+  // cache (Pages: max-age 600) would otherwise serve a stale module for up
+  // to 10 min after a deploy, and old JS against new HTML breaks.
+  // (A navigate-mode Request can't be re-inited — refetch those by URL.)
   // Always fetch HTML fresh so app updates are picked up immediately
   // HTML and the vendored JS modules always fresh (they ship in lockstep)
   if (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname.endsWith('/') || url.pathname === '') {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
+      fetch(e.request.mode === 'navigate' ? e.request.url : e.request, { cache: 'no-cache' }).catch(() => caches.match(e.request))
     );
     return;
   }
