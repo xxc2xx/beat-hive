@@ -100,7 +100,7 @@ catch(e){ fail++; }
 // 12 ── vendored shared modules: present, loaded, and identical to the
 //       pitch-trainer source when that repo is checked out next door
 { const path=require('path'), dir=path.dirname(F), src=path.join(dir,'..','pitch-trainer');
-  ['music-core.js','hear.js'].forEach(f=>{
+  ['music-core.js','hear.js','midi.js'].forEach(f=>{
     const mine=path.join(dir,f);
     if(!fs.existsSync(mine)){ bad('vendored '+f+' missing'); return; }
     if(!h.includes('<script src="'+f+'"></script>')){ bad(f+' not loaded by index.html'); return; }

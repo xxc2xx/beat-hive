@@ -506,6 +506,7 @@
 
   <script src="music-core.js"></script>
   <script src="hear.js"></script>
+  <script src="midi.js"></script>
   <script>
   // ── iOS audio unlock ──────────────────────────────────────────────────
   // iOS Safari suspends every new AudioContext until the page has received
@@ -5153,6 +5154,7 @@ Output the token list now, nothing else:`
     }
     buildKeys(25);                                       // default G3–B4
   }
+  window.__goBank=i=>goBank(i); window.__BANKS=BANKS;   // deep link (?song=) from the bridge
   function goBank(i){
     bankIdx=(i+BANKS.length)%BANKS.length;
     const bank=BANKS[bankIdx];
@@ -5739,10 +5741,16 @@ Output the token list now, nothing else:`
     ov.innerHTML='<h2>Pick a song for the pads</h2><div class="sb-grid">'+
       (window.__bhVoice?'<button class="sb-voice" data-v="1"><span class="ic">🎤</span>My last recording</button>':'')+
       all.map(btn).join('')+'</div>'+(take?'<button class="sb-x" data-k="1">keep '+String(take.title).replace(/[<>&]/g,'')+'</button>':'')+
+      (window.Midi&&Midi.supported&&!Midi.connected?'<button class="sb-x" data-midi="1">🎹 Connect her keyboard</button>':'')+
       '<button class="sb-x" data-x="1">✕ close</button>';
     document.body.appendChild(ov);
     ov.addEventListener('click',e=>{
       const b=e.target.closest('button'); if(!b) return;
+      if(b.dataset.midi){                         // connect keeps the picker open
+        djAudioCtx().resume&&djAudioCtx().resume();
+        Midi.connect().then(ok=>{ say(ok&&Midi.connected?'🎹 Keyboard connected':'🎹 No keyboard found — plug it in',2500); if(Midi.connected) b.remove(); });
+        return;
+      }
       ov.remove();
       if(mySession!==session) return;
       if(b.dataset.v) fromVoice();
@@ -5751,8 +5759,54 @@ Output the token list now, nothing else:`
     });
   }
 
+  // ── Deep link from Pitch Trainer: ?song=<id> → tempo + SONG bank, no picker
+  let pending=null;
+  async function deepLink(){
+    const id=new URLSearchParams(location.search).get('song'); if(!id) return;
+    let t=null; try{ t=await MC.store.getTake(id); }catch(e){}
+    if(!t) t=MC.builtinTakes().find(x=>x.id===id)||null;
+    if(!t||!t.notes||!t.notes.length){ say('That song isn’t in this browser’s library',3000); return; }
+    const sl=document.getElementById('djBpmSlider');
+    const bpm=Math.max(60,Math.min(180,Math.round(t.bpm||100)));
+    if(sl){ sl.value=bpm; sl.dispatchEvent(new Event('input',{bubbles:true})); }
+    pending=t;
+    if(window.__goBank&&window.__BANKS) window.__goBank(window.__BANKS.indexOf('song'));
+    say('🥁 '+t.title+' at '+bpm+' BPM — press ▶ for the beat, follow the glowing pad',4500);
+  }
+  setTimeout(deepLink,400);                     // after the reskin has built the banks
+
+  // ── Her keyboard (midi.js, Chrome): a pad lights when she plays its note
+  function playPitch(m){
+    const ctx=djAudioCtx(), t=ctx.currentTime, f=MC.midiToFreq(m);
+    const o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain();
+    o.type='sine'; o2.type='triangle'; o.frequency.value=f; o2.frequency.value=f*2.005;
+    g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.34,t+0.012); g.gain.exponentialRampToValueAtTime(0.0001,t+1.1);
+    o.connect(g); o2.connect(g); g.connect(ctx.destination); o.start(t); o2.start(t); o.stop(t+1.15); o2.stop(t+1.15);
+  }
+  if(window.Midi){
+    Midi.onNote((m,vel,on)=>{
+      if(!on) return;
+      const ctx=djAudioCtx();
+      // no tap yet → audio is suspended: still light the pads and move the
+      // guide (silently), and ask for the one tap that turns sound on
+      if(ctx.state!=='running'){ ctx.resume().catch(()=>{}); if(ctx.state!=='running') say('🔇 tap the screen once to hear the keyboard',2500); }
+      const i=active?pitches.indexOf(m):-1;
+      if(i>=0){
+        const pad=PADS()[i];
+        if(pad){ pad.classList.add('flash'); setTimeout(()=>pad.classList.remove('flash'),140); }
+        playSongPad(i);                           // also advances the glowing guide
+      } else playPitch(m);
+    });
+    Midi.autoConnect();                           // same origin as Pitch Trainer: permission carries over
+  }
+
   window.__songBank={
-    enter(){ session++; if(take){ active=true; layout(); } pick(); },
+    enter(){
+      session++;
+      if(pending){ const t=pending; pending=null; useTake(t); return; }   // deep link: straight in
+      if(take){ active=true; layout(); }
+      pick();
+    },
     leave(){
       session++; active=false;
       PADS().forEach(p=>p.classList.remove('sb-guide','sb-off'));
