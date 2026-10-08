@@ -103,7 +103,115 @@
       notes: (o.notes || []).map(n => ({ m:n.m, t:n.t, d:n.d, v:n.v == null ? 0.8 : n.v }))
                             .sort((a,b) => a.t - b.t || a.m - b.m),
       audioId: o.audioId || null,
+      // Song fields (all optional — a plain Take is still a valid Song)
+      sync:    o.sync || null,      // { audioId, kind:'audio'|'video', offsetSec, beatTimes:[sec…] }
+      parts:   o.parts || null,     // { chords:[{t,d,label,ms}], parent:[notes] }
+      section: o.section || null,   // { from, to } in beats — practice loop
+      range:   o.range || null,     // [lo, hi] fitted to her keyboard
+      tag:     o.tag || null,
+      analyzed: !!o.analyzed,       // notes came from the song analyzer (✨)
+      icon:    o.icon || null,
     };
+  }
+
+  // ── Sync: beats ↔ seconds of the original recording ───────────────────
+  // beatTimes[i] = second at which beat i happens (handles tempo drift);
+  // without it, a constant tempo from offsetSec.
+  function beatToSec(song, beat){
+    const s = song.sync || {}, bt = s.beatTimes;
+    if(bt && bt.length > 1){
+      const i = Math.max(0, Math.min(bt.length - 2, Math.floor(beat)));
+      return bt[i] + (beat - i) * (bt[i + 1] - bt[i]);
+    }
+    return (s.offsetSec || 0) + beat * 60 / (song.bpm || 90);
+  }
+  function secToBeat(song, sec){
+    const s = song.sync || {}, bt = s.beatTimes;
+    if(bt && bt.length > 1){
+      let lo = 0, hi = bt.length - 2;
+      if(sec <= bt[0]) return (sec - bt[0]) / (bt[1] - bt[0]);
+      if(sec >= bt[hi + 1]) return hi + 1 + (sec - bt[hi + 1]) / (bt[hi + 1] - bt[hi]);
+      while(lo < hi){ const mid = (lo + hi + 1) >> 1; if(bt[mid] <= sec) lo = mid; else hi = mid - 1; }
+      return lo + (sec - bt[lo]) / (bt[lo + 1] - bt[lo]);
+    }
+    return (sec - (s.offsetSec || 0)) * (song.bpm || 90) / 60;
+  }
+  // Song analyzer result (seconds, see ~/song-analyzer) → this song on its
+  // real beat map: melody + chords in beats, sync.beatTimes from the beats.
+  function songFromAnalysis(song, res, grid){
+    const bt = (res.beatTimes || []).slice();
+    if(bt.length < 4) throw new Error('Analysis found too few beats');
+    const probe = { bpm: res.bpm, sync: { beatTimes: bt } };
+    const toB = sec => secToBeat(probe, sec);
+    let notes = (res.melody || []).map(n => ({ m: n.m, t: toB(n.on), d: Math.max(0.1, toB(n.off) - toB(n.on)), v: n.v == null ? 0.8 : Math.min(1, n.v) }));
+    notes = quantize(notes, grid || 0.25);
+    const seen = new Map();                      // quantize can stack two notes on one onset
+    notes.forEach(n => { const k = n.t; if(!seen.has(k) || seen.get(k).m < n.m) seen.set(k, n); });
+    notes = [...seen.values()].sort((a, b) => a.t - b.t);
+    const chords = (res.chords || []).map(c => ({ t: Math.round(toB(c.t) * 4) / 4, d: Math.max(0.25, Math.round((toB(c.t + c.d) - toB(c.t)) * 4) / 4),
+                                                  label: c.label, root: c.root, minor: !!c.minor }));
+    return makeTake({ ...song, notes, bpm: Math.round(res.bpm) || song.bpm, key: (res.key || song.key || 'C').replace(/m$/, ''),
+      sync: { ...(song.sync || {}), beatTimes: bt, offsetSec: bt[0] },
+      parts: { ...(song.parts || {}), chords }, analyzed: true });
+  }
+
+  // Dad's part when the song has no chords: per bar, the I / IV / V / vi
+  // chord of the song's key that covers the most melody (weighted by
+  // duration, downbeat counts double). Voiced around C3–B3 for the left hand.
+  const KEY_PC = { C:0, 'C#':1, Db:1, D:2, Eb:3, 'D#':3, E:4, F:5, 'F#':6, Gb:6, G:7, Ab:8, 'G#':8, A:9, Bb:10, 'A#':10, B:11, Cb:11 };
+  function chordTones(root, minor, base){
+    base = base == null ? 48 : base;                 // C3
+    const r = base + ((root % 12) + 12) % 12;
+    return [r, r + (minor ? 3 : 4), r + 7];
+  }
+  function autoChords(song){
+    const k = KEY_PC[String(song.key || 'C').replace(/m$/, '')] || 0;
+    const cands = [[0, false, 'I'], [5, false, 'IV'], [7, false, 'V'], [9, true, 'vi']];
+    const bpb = song.timeSig ? song.timeSig[0] * 4 / song.timeSig[1] : 4;
+    const notes = song.notes || [], end = takeLength(song);
+    const out = [];
+    for(let b0 = Math.floor((notes[0] ? notes[0].t : 0) / bpb) * bpb; b0 < end; b0 += bpb){
+      const inBar = notes.filter(n => n.t < b0 + bpb && n.t + n.d > b0);
+      if(!inBar.length){ continue; }
+      let best = cands[0], bestSc = -1;
+      cands.forEach((c, ci) => {
+        const pcs = [0, c[1] ? 3 : 4, 7].map(x => (k + c[0] + x) % 12);
+        let sc = 0;
+        inBar.forEach(n => {
+          const w = Math.min(n.t + n.d, b0 + bpb) - Math.max(n.t, b0);
+          sc += pcs.includes(pc(n.m)) ? w * (Math.abs(n.t - b0) < 1e-6 ? 2 : 1) : 0;
+        });
+        sc -= ci * 0.01;                            // ties → simpler chord (I before IV before V)
+        if(sc > bestSc){ bestSc = sc; best = c; }
+      });
+      const root = (k + best[0]) % 12;
+      const prev = out[out.length - 1];
+      if(prev && prev.root === root && prev.minor === best[1] && Math.abs(prev.t + prev.d - b0) < 1e-6){ prev.d += bpb; continue; }
+      out.push({ t: b0, d: bpb, root, minor: best[1], label: NOTE_NAMES[root].replace('#', '♯') + (best[1] ? 'm' : '') });
+    }
+    return out.map(c => ({ ...c, ms: chordTones(c.root, c.minor) }));
+  }
+  function chordAt(chords, beat){
+    let cur = null; (chords || []).forEach(c => { if(c.t <= beat + 1e-6) cur = c; });
+    return cur && beat < cur.t + cur.d + 1e-6 ? cur : null;
+  }
+
+  // Tempo from note onsets (seconds): the 8th-note grid, anchored on the
+  // first onset, that the onsets fit best. Folded into 70–150 BPM.
+  function estimateTempo(onsets){
+    if(!onsets || onsets.length < 4) return 90;
+    const t0 = onsets[0];
+    let best = 90, bestSc = -Infinity;
+    for(let bpm = 60; bpm <= 180; bpm += 0.5){
+      const step = 30 / bpm;                         // 8th note
+      let sc = 0;
+      onsets.forEach(t => { sc += Math.cos(2 * Math.PI * (t - t0) / step); });
+      sc -= Math.abs(bpm - 105) * 0.01 * onsets.length;   // mild prior toward moderate tempi
+      if(sc > bestSc){ bestSc = sc; best = bpm; }
+    }
+    while(best > 150) best /= 2;
+    while(best < 70) best *= 2;
+    return Math.round(best);
   }
   function takeLength(take){
     return take.notes.reduce((mx,n) => Math.max(mx, n.t + n.d), 0);
@@ -225,7 +333,8 @@
     pc, octaveOf, midiToFreq, freqToMidiFloat, midiName, midiOf,
     colorOf, isBlack, shapeOf, label,
     LEVELS, getLevel, setLevel,
-    makeTake, takeLength, skyline, quantize,
+    makeTake, takeLength, skyline, quantize, beatToSec, secToBeat, estimateTempo, songFromAnalysis,
+    autoChords, chordAt, chordTones,
     parseTokens, fromTokens, toTokens,
     BUILTIN, builtinTakes,
     store,
