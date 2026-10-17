@@ -1,10 +1,10 @@
-const CACHE = 'bh-v21';
+const CACHE = 'bh-v22';
 // Both apps live on xxc2xx.github.io and share Cache Storage: only ever
 // delete OUR caches (same prefix) plus the old shared 'pitch-vN' names both
 // apps used before they had their own prefixes.
 const PREFIX = CACHE.replace(/v\d+$/, '');
 
-const STATIC = ['./icon-192.png', './icon-512.png', './manifest.json'];
+const STATIC = ['./icon-192.png', './icon-512.png', './manifest.json', './music-core.js', './hear.js', './midi.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -33,7 +33,11 @@ self.addEventListener('fetch', e => {
   // HTML and the vendored JS modules always fresh (they ship in lockstep)
   if (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname.endsWith('/') || url.pathname === '') {
     e.respondWith(
-      fetch(e.request.mode === 'navigate' ? e.request.url : e.request, { cache: 'no-cache' }).catch(() => caches.match(e.request))
+      fetch(e.request.mode === 'navigate' ? e.request.url : e.request, { cache: 'no-cache' }).then(r => {
+        // keep the latest page + modules as the offline copy
+        if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request.mode === 'navigate' ? e.request.url : e.request, copy)); }
+        return r;
+      }).catch(() => caches.match(e.request.mode === 'navigate' ? e.request.url : e.request, { ignoreSearch: true }))
     );
     return;
   }
