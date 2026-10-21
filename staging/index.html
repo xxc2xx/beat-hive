@@ -303,7 +303,7 @@
   </style>
 </head>
 <body>
-<div style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99999;background:#ff9800;color:#000;font:700 10px/1.6 sans-serif;padding:0 8px;border-radius:0 0 6px 6px;pointer-events:none">STAGING 07039dd</div>
+<div style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99999;background:#ff9800;color:#000;font:700 10px/1.6 sans-serif;padding:0 8px;border-radius:0 0 6px 6px;pointer-events:none">STAGING a756ff6</div>
   <h1>🎵 Pitch Trainer</h1>
 
   <div class="tabs">
@@ -506,9 +506,9 @@
     <p class="hint" id="hint">Tap Start, then sing or play any note</p>
   </div>
 
-  <script src="music-core.js?v=07039dd"></script>
-  <script src="hear.js?v=07039dd"></script>
-  <script src="midi.js?v=07039dd"></script>
+  <script src="music-core.js?v=a756ff6"></script>
+  <script src="hear.js?v=a756ff6"></script>
+  <script src="midi.js?v=a756ff6"></script>
   <script>
   // ── iOS audio unlock ──────────────────────────────────────────────────
   // iOS Safari suspends every new AudioContext until the page has received
@@ -5457,27 +5457,31 @@ Output the token list now, nothing else:`
     if(micOut){ try{ micOut.connect(recTap); }catch(e){ console.error('[beat-hive] mic',e); } }
     // A second recorder on the raw mic: the mix has drums in it, which wreck
     // note transcription. Kept in memory for the SONG bank picker.
+    // Each take keeps its own chunk list: the last chunk and onstop arrive
+    // after stop(), and a quick re-tap of REC must not mix the two takes.
     voiceRec=null; voiceChunks=[];
     if(micStream){
       try{
-        voiceRec=new MediaRecorder(micStream, mt?{mimeType:mt}:undefined);
-        voiceRec.ondataavailable=e=>{ if(e.data&&e.data.size) voiceChunks.push(e.data); };
-        const vr=voiceRec;
-        vr.onstop=()=>{ window.__bhVoice={ blob:new Blob(voiceChunks,{type:vr.mimeType||'audio/mp4'}),
+        const vr=new MediaRecorder(micStream, mt?{mimeType:mt}:undefined), vc=voiceChunks;
+        voiceRec=vr;
+        vr.ondataavailable=e=>{ if(e.data&&e.data.size) vc.push(e.data); };
+        vr.onstop=()=>{ window.__bhVoice={ blob:new Blob(vc,{type:vr.mimeType||'audio/mp4'}),
                                            bpm:djBpm, at:Date.now() }; };
         voiceRec.start(250);
       }catch(e){ voiceRec=null; }
     }
     recChunks=[];
-    recorder.ondataavailable=e=>{ if(e.data&&e.data.size) recChunks.push(e.data); };
-    recorder.onstop=()=>{
-      recBlob=new Blob(recChunks,{type:recorder.mimeType||'audio/mp4'});
+    const rec=recorder, rc=recChunks, t0=Date.now();
+    rec.ondataavailable=e=>{ if(e.data&&e.data.size) rc.push(e.data); };
+    rec.onstop=()=>{
+      recBlob=new Blob(rc,{type:rec.mimeType||'audio/mp4'});
+      if(recorder!==rec) return;            // a newer take already owns the tap + UI
       recTap=null; recBeatBus=null;
       pbBtn.disabled=false; shBtn.disabled=false;
-      recTime.textContent=fmt(Date.now()-recT0)+' ✓';
+      recTime.textContent=fmt(Date.now()-t0)+' ✓';
     };
     recorder.start(250);   // timeslice: keeps container timing honest
-    recT0=Date.now();
+    recT0=t0;
     recBtn.classList.add('on'); recBtn.innerHTML='<i>■</i><b>STOP</b>';
     recTimer=setInterval(()=>{ recTime.textContent=fmt(Date.now()-recT0); },250);
   }
